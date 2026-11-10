@@ -40,6 +40,7 @@ BLE hanya dapat diuji di perangkat fisik.
 | `UpdateChecker.swift` | Manifes pembaruan `lereng.ios-update/1` |
 | `AppModel.swift` | Keadaan aplikasi, rekaman, ekspor, identitas |
 | `*View.swift` | Rekam, Analisis, Data, Profil, peta rute, gerbang pembaruan |
+| `Assets.xcassets/` | Ikon aplikasi (dibuat oleh `tools/make_ios_icon.py`) |
 | `LerengOfflineTests/` | Uji codec BLE, ekspor, SQLite, dan manifes pembaruan |
 
 ## Kesetaraan data dengan Android
