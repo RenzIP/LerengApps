@@ -51,6 +51,24 @@ final class BleGroupCodecTests: XCTestCase {
         XCTAssertNil(BleGroupCodec.payload(fromManufacturerData: Data([0xFF, 0xFF])))
     }
 
+    func testCompactManufacturerDataFromAndroid() throws {
+        let compact = try XCTUnwrap(BleGroupCodec.compactPayload(groupCode: "gunung77", participantId: "1A2B3C4D"))
+        XCTAssertEqual(compact.count, BleGroupCodec.compactPayloadBytes)
+        XCTAssertEqual(compact.count, 8)
+        let manufacturer = try XCTUnwrap(BleGroupCodec.manufacturerData(payload: compact))
+        XCTAssertEqual(manufacturer.count, 10)
+        let parsed = try XCTUnwrap(BleGroupCodec.payload(fromManufacturerData: manufacturer))
+        XCTAssertEqual(BleGroupCodec.parsePeerId(payload: parsed, expectedGroupCode: "GUNUNG77"), "1A2B3C4D")
+    }
+
+    func testCompactPayloadRejectsOtherGroupAndLengths() throws {
+        let compact = try XCTUnwrap(BleGroupCodec.compactPayload(groupCode: "GUNUNG77", participantId: "1A2B3C4D"))
+        XCTAssertNil(BleGroupCodec.parsePeerId(payload: compact, expectedGroupCode: "GUNUNG88"))
+        XCTAssertNil(BleGroupCodec.parsePeerId(payload: compact + Data([0x00]), expectedGroupCode: "GUNUNG77"))
+        XCTAssertNil(BleGroupCodec.payload(fromManufacturerData: Data([0xFF, 0xFF, 0x01])))
+        XCTAssertNil(BleGroupCodec.compactPayload(groupCode: "pendek", participantId: "1A2B3C4D"))
+    }
+
     func testNewIdentifiers() {
         let code = BleGroupCodec.newGroupCode()
         XCTAssertEqual(code.count, 10)

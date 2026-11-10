@@ -12,8 +12,12 @@ enum BleGroupCodec {
     static let manufacturerCompanyId: UInt16 = 0xFFFF
 
     static let groupTagBytes = 6
+    static let compactTagBytes = 4
     static let idBytes = 4
     static let payloadBytes = groupTagBytes + idBytes
+    /// Payload ringkas 8 byte untuk manufacturer data: Android hanya punya sisa 10 byte di scan
+    /// response setelah service UUID 128-bit (18 byte) dan batas paket 31 byte.
+    static let compactPayloadBytes = compactTagBytes + idBytes
 
     private static let codeAlphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
 
@@ -46,23 +50,40 @@ enum BleGroupCodec {
         return data
     }
 
+    /// Payload ringkas 8 byte untuk manufacturer data (bentuk yang disiarkan Android).
+    static func compactPayload(groupCode: String, participantId: String) -> Data? {
+        let normalized = normalizeGroupCode(groupCode)
+        guard isValidGroupCode(normalized), isValidParticipantId(participantId) else { return nil }
+        let digest = SHA256.hash(data: Data(normalized.utf8))
+        var data = Data(digest.prefix(compactTagBytes))
+        data.append(contentsOf: hexBytes(participantId))
+        return data
+    }
+
+    /// Menerima payload 10 byte (Service Data Android) maupun 8 byte (manufacturer data).
     static func parsePeerId(payload: Data, expectedGroupCode: String) -> String? {
-        guard payload.count == payloadBytes, isValidGroupCode(expectedGroupCode) else { return nil }
+        guard isValidGroupCode(expectedGroupCode) else { return nil }
+        let tagBytes: Int
+        switch payload.count {
+        case payloadBytes: tagBytes = groupTagBytes
+        case compactPayloadBytes: tagBytes = compactTagBytes
+        default: return nil
+        }
         let digest = SHA256.hash(data: Data(normalizeGroupCode(expectedGroupCode).utf8))
-        guard Data(digest.prefix(groupTagBytes)) == payload.prefix(groupTagBytes) else { return nil }
+        guard Data(digest.prefix(tagBytes)) == payload.prefix(tagBytes) else { return nil }
         return payload.suffix(idBytes).map { String(format: "%02X", $0) }.joined()
     }
 
-    /// Manufacturer data dari Android: 2 byte company ID (little endian) + payload 10 byte.
+    /// Manufacturer data dari Android: 2 byte company ID (little endian) + payload 8/10 byte.
     static func payload(fromManufacturerData data: Data) -> Data? {
-        guard data.count == 2 + payloadBytes else { return nil }
+        guard data.count == 2 + payloadBytes || data.count == 2 + compactPayloadBytes else { return nil }
         let company = UInt16(data[data.startIndex]) | (UInt16(data[data.startIndex + 1]) << 8)
         guard company == manufacturerCompanyId else { return nil }
         return data.subdata(in: (data.startIndex + 2)..<data.endIndex)
     }
 
     static func manufacturerData(payload: Data) -> Data? {
-        guard payload.count == payloadBytes else { return nil }
+        guard payload.count == payloadBytes || payload.count == compactPayloadBytes else { return nil }
         var data = Data([UInt8(manufacturerCompanyId & 0xFF), UInt8(manufacturerCompanyId >> 8)])
         data.append(payload)
         return data

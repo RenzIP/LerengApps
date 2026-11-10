@@ -60,13 +60,16 @@ BLE hanya dapat diuji di perangkat fisik.
 | --- | --- |
 | iOS → Android | iOS meng-advertise service UUID dan menyediakan karakteristik GATT `...4c6572656e67`; Android terhubung lalu membaca 10 byte tersebut. |
 | iOS → iOS | Sama, lewat GATT (iOS tidak mengizinkan Service Data kustom di advertisement). |
-| Android → iOS | iOS membaca Manufacturer Data (`company ID 0xFFFF` + 10 byte) dari scan response. **Android belum menyiarkannya**; tanpa perubahan itu iOS hanya melihat perangkat iOS. |
+| Android → iOS | Android (v2.5.2 ke atas) menaruh Manufacturer Data `company ID 0xFFFF` + payload **8 byte** di scan response; iOS membacanya langsung dari `advertisementData`. |
 
-Payload 10 byte = 6 byte pertama SHA-256 dari kode outing + 4 byte ID peserta. Tidak ada MAC,
-RSSI, jarak, atau posisi yang dipertukarkan maupun disimpan.
+Payload Service Data 10 byte = 6 byte pertama SHA-256 dari kode outing + 4 byte ID peserta.
+Manufacturer data memakai bentuk ringkas 8 byte (4 + 4) karena scan response hanya 31 byte:
+service UUID 128-bit sudah memakan 18 byte, sehingga payload 10 byte + 2 byte company ID tidak
+muat. Keduanya diterima pembaca; tidak ada MAC, RSSI, jarak, atau posisi yang dipertukarkan
+maupun disimpan.
 
-Untuk menutup celah Android → iOS, `BlePresenceController` di Android perlu menambahkan
-`AdvertiseData` manufacturer `0xFFFF` berisi payload yang sama sebagai scan response.
+Aplikasi iOS build 2 (v1.1.0) adalah versi pertama yang membaca bentuk 8 byte tersebut. Build 1
+hanya memahami bentuk 10 byte, jadi Android→iOS baru terlihat setelah aplikasi diperbarui.
 
 ## Pembaruan
 

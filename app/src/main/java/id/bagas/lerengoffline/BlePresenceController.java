@@ -54,6 +54,7 @@ public final class BlePresenceController {
     private boolean advertisingStarted;
     private boolean scanningStarted;
     private boolean running;
+    private boolean includeManufacturerData;
 
     public BlePresenceController(Context context, SurveyDatabase database, long surveyId,
                                  String groupCode, String ownParticipantId, Listener listener) {
@@ -100,6 +101,7 @@ public final class BlePresenceController {
                 return;
             }
             running = true;
+            includeManufacturerData = true;
             if (advertiser != null) startAdvertising();
             if (scanner != null) startScanning();
             status((advertiser != null && scanner != null)
@@ -125,11 +127,16 @@ public final class BlePresenceController {
                 .setIncludeDeviceName(false)
                 .addServiceData(BleGroupCodec.serviceUuid(), payload)
                 .build();
-        AdvertiseData scanResponse = new AdvertiseData.Builder()
+        AdvertiseData.Builder scanResponseBuilder = new AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceUuid(BleGroupCodec.serviceUuid())
-                .build();
-        advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback);
+                .addServiceUuid(BleGroupCodec.serviceUuid());
+        // iPhone tidak dapat membaca Service Data kustom; payload 8 byte di manufacturer data
+        // (2 byte company ID ditambahkan oleh tumpukan Bluetooth, jadi total 10 byte) adalah
+        // satu-satunya jalur Android -> iOS. Batas 31 byte: 18 (UUID) + 10 (manufacturer) = 28.
+        byte[] compact = includeManufacturerData
+                ? BleGroupCodec.createCompactPayload(groupCode, ownParticipantId) : null;
+        if (compact != null) scanResponseBuilder.addManufacturerData(BleGroupCodec.MANUFACTURER_ID, compact);
+        advertiser.startAdvertising(settings, data, scanResponseBuilder.build(), advertiseCallback);
     }
 
     @SuppressLint("MissingPermission")
@@ -146,9 +153,19 @@ public final class BlePresenceController {
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override public void onStartSuccess(AdvertiseSettings settingsInEffect) {
             advertisingStarted = true;
-            status("BLE iklan aktif; Android dan iPhone dapat mendeteksi outing ini.");
+            status(includeManufacturerData
+                    ? "BLE iklan aktif; Android dan iPhone dapat mendeteksi outing ini."
+                    : "BLE iklan aktif tanpa data lintas platform; Android tetap terdeteksi, iPhone tidak.");
         }
         @Override public void onStartFailure(int errorCode) {
+            if (errorCode == AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE && includeManufacturerData && running) {
+                // Sebagian tumpukan Bluetooth menolak paket penuh; iklan biasa tetap dijalankan
+                // supaya deteksi sesama Android tidak ikut hilang.
+                includeManufacturerData = false;
+                status("Iklan BLE dipersempit: ponsel ini tidak menyisakan ruang untuk data iPhone; GPS tetap merekam.");
+                startAdvertising();
+                return;
+            }
             advertisingStarted = false;
             status("Iklan BLE tidak didukung/dapat dimulai (" + errorCode + "); GPS tetap merekam.");
         }

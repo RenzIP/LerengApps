@@ -18,6 +18,16 @@ public final class BleGroupCodec {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int GROUP_TAG_BYTES = 6;
     private static final int ID_BYTES = 4;
+    private static final int COMPACT_TAG_BYTES = 4;
+
+    /**
+     * Company ID untuk manufacturer data. 0xFFFF dipakai bersama (bukan milik vendor) karena
+     * khusus pertukaran sesama aplikasi Lereng; iOS hanya bisa membaca kehadiran Android lewat
+     * manufacturer data, tidak lewat Service Data kustom.
+     */
+    public static final int MANUFACTURER_ID = 0xFFFF;
+    /** Delapan byte: empat byte potongan SHA-256 kode outing dan empat byte ID peserta. */
+    public static final int COMPACT_PAYLOAD_BYTES = COMPACT_TAG_BYTES + ID_BYTES;
 
     private BleGroupCodec() {}
 
@@ -65,12 +75,36 @@ public final class BleGroupCodec {
 
     /** Returns a peer ID only for the same outing; callers must discard other scan fields. */
     public static String parsePeerId(byte[] payload, String expectedGroupCode) {
-        if (payload == null || payload.length != GROUP_TAG_BYTES + ID_BYTES || !isValidGroupCode(expectedGroupCode)) return null;
+        return parsePeerId(payload, expectedGroupCode, GROUP_TAG_BYTES);
+    }
+
+    /**
+     * Delapan byte untuk manufacturer data di scan response. Lebih pendek dari Service Data
+     * karena scan response legacy hanya punya 31 byte dan service UUID 128-bit sudah memakai 18.
+     */
+    public static byte[] createCompactPayload(String groupCode, String participantId) {
+        String normalized = normalizeGroupCode(groupCode);
+        if (!isValidGroupCode(normalized) || !isValidParticipantId(participantId)) return null;
+        byte[] digest = sha256(normalized.getBytes(StandardCharsets.UTF_8));
+        byte[] id = fromHex(participantId);
+        byte[] payload = new byte[COMPACT_PAYLOAD_BYTES];
+        System.arraycopy(digest, 0, payload, 0, COMPACT_TAG_BYTES);
+        System.arraycopy(id, 0, payload, COMPACT_TAG_BYTES, ID_BYTES);
+        return payload;
+    }
+
+    /** Pasangan dari {@link #createCompactPayload}; iOS memakai bentuk yang sama. */
+    public static String parseCompactPeerId(byte[] payload, String expectedGroupCode) {
+        return parsePeerId(payload, expectedGroupCode, COMPACT_TAG_BYTES);
+    }
+
+    private static String parsePeerId(byte[] payload, String expectedGroupCode, int tagBytes) {
+        if (payload == null || payload.length != tagBytes + ID_BYTES || !isValidGroupCode(expectedGroupCode)) return null;
         byte[] expectedDigest = sha256(normalizeGroupCode(expectedGroupCode).getBytes(StandardCharsets.UTF_8));
-        byte[] expectedTag = Arrays.copyOf(expectedDigest, GROUP_TAG_BYTES);
-        byte[] suppliedTag = Arrays.copyOfRange(payload, 0, GROUP_TAG_BYTES);
+        byte[] expectedTag = Arrays.copyOf(expectedDigest, tagBytes);
+        byte[] suppliedTag = Arrays.copyOfRange(payload, 0, tagBytes);
         if (!MessageDigest.isEqual(expectedTag, suppliedTag)) return null;
-        return toHex(Arrays.copyOfRange(payload, GROUP_TAG_BYTES, payload.length));
+        return toHex(Arrays.copyOfRange(payload, tagBytes, payload.length));
     }
 
     private static byte[] sha256(byte[] input) {

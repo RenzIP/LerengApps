@@ -1,4 +1,4 @@
-# Lereng Offline 2.5.1
+# Lereng Offline 2.5.2
 
 Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga, unduhan dataset otomatis, atau unggahan track.
 
@@ -80,8 +80,8 @@ melakukan `GET` HTTPS ke manifes itu (±7 detik timeout, maksimal 64 KB) dan mem
 ```powershell
 # hasilkan manifes dari APK yang akan dirilis
 python tools\publish_update.py --apk app\build\outputs\apk\debug\app-debug.apk `
-  --version-code 10 --version-name 2.5.1 `
-  --apk-url https://contoh.example/lereng/LerengOffline-2.5.1.apk --mandatory
+  --version-code 11 --version-name 2.5.2 `
+  --apk-url https://contoh.example/lereng/LerengOffline-2.5.2.apk --mandatory
 
 # bangun APK yang menunjuk ke manifes tersebut
 .\gradlew.bat assembleDebug -PlerengUpdateUrl="https://contoh.example/lereng/update.json"
@@ -97,7 +97,7 @@ Rilis proyek ini memakai GitHub:
 
 ## Instalasi dan build
 
-Pasang `LerengOffline-v2.5.1.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
+Pasang `LerengOffline-2.5.2.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
 
 ```bash
 ./gradlew assembleDebug
