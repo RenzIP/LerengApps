@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+captures/
+.cxx/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Artefak build: APK/AAB dirilis lewat GitHub Releases, bukan commit
+*.apk
+*.aab
+*.ap_
+
+dist/

@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Pemeriksaan pembaruan: isi lewat -PlerengUpdateUrl=https://... atau gradle.properties.
+// Kosong berarti fitur nonaktif dan APK tetap sepenuhnya offline.
+def lerengUpdateUrl = (project.findProperty('lerengUpdateUrl') ?: '').toString()
+
+android {
+    namespace 'id.bagas.lerengoffline'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'id.bagas.lerengoffline'
+        minSdk 26
+        targetSdk 34
+        versionCode 10
+        versionName '2.5.1'
+        buildConfigField 'String', 'UPDATE_MANIFEST_URL', "\"${lerengUpdateUrl}\""
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

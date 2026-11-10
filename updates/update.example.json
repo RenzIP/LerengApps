@@ -1,0 +1,15 @@
+{
+  "schema": "lereng.update/1",
+  "versionCode": 10,
+  "versionName": "2.5.1",
+  "mandatory": false,
+  "minSupportedVersionCode": 9,
+  "apkUrl": "https://contoh.example/lereng/LerengOffline-2.5.1.apk",
+  "sizeBytes": 0,
+  "sha256": "",
+  "notes": [
+    "Perbaikan peta rute offline",
+    "Ekspor JSONL lebih cepat"
+  ],
+  "publishedAt": "2026-11-09T00:00:00Z"
+}

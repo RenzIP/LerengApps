@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Surfaces -->
+    <color name="bg">#0C1310</color>
+    <color name="surface">#141D18</color>
+    <color name="surface_alt">#1C2721</color>
+    <color name="surface_sunken">#101915</color>
+    <color name="neutral_container">#222E27</color>
+
+    <!-- Brand -->
+    <color name="primary">#79D6AC</color>
+    <color name="on_primary">#06251A</color>
+    <color name="primary_container">#1A3C2D</color>
+    <color name="on_primary_container">#CDEDDD</color>
+
+    <!-- Text -->
+    <color name="text">#E9F1EB</color>
+    <color name="text_muted">#A9B9AE</color>
+    <color name="text_faint">#8FA196</color>
+
+    <!-- Lines -->
+    <color name="outline">#2A3A31</color>
+    <color name="outline_strong">#405448</color>
+
+    <!-- Accent -->
+    <color name="accent">#F0A868</color>
+    <color name="accent_container">#3A2A1A</color>
+    <color name="on_accent_container">#F7D9B8</color>
+
+    <!-- States -->
+    <color name="danger">#F2B8B5</color>
+    <color name="danger_container">#4A2320</color>
+    <color name="success">#7BD8AE</color>
+    <color name="success_container">#163B2C</color>
+    <color name="warning">#EAC26B</color>
+    <color name="warning_container">#3A2F17</color>
+
+    <!-- Hero / top bar -->
+    <color name="hero_top">#07120D</color>
+    <color name="hero_bottom">#0F3B2B</color>
+    <color name="hero_text">#F1F7F3</color>
+    <color name="hero_muted">#A9C4B4</color>
+
+    <!-- Effects -->
+    <color name="ripple">#3379D6AC</color>
+    <color name="ripple_on_dark">#33FFFFFF</color>
+    <color name="scrim">#99000000</color>
+
+    <!-- Charts -->
+    <color name="chart_line">#79D6AC</color>
+    <color name="chart_fill_top">#3379D6AC</color>
+    <color name="chart_fill_bottom">#0079D6AC</color>
+    <color name="chart_grid">#2A3A31</color>
+    <color name="chart_axis">#8FA196</color>
+    <color name="chart_marker">#F0A868</color>
+
+    <!-- Terrain -->
+    <color name="terrain_low">#2A5F46</color>
+    <color name="terrain_mid">#6E8F52</color>
+    <color name="terrain_high">#B08D5B</color>
+    <color name="terrain_peak">#8F5F35</color>
+    <color name="terrain_outline">#0A1410</color>
+    <color name="terrain_point">#79D6AC</color>
+    <color name="terrain_point_ring">#0C1310</color>
+    <color name="terrain_badge_bg">#1C2721</color>
+    <color name="terrain_badge_text">#CDEDDD</color>
+</resources>

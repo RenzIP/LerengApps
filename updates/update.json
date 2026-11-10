@@ -1,0 +1,16 @@
+{
+  "schema": "lereng.update/1",
+  "versionCode": 10,
+  "versionName": "2.5.1",
+  "mandatory": true,
+  "minSupportedVersionCode": 0,
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.1/LerengOffline-2.5.1.apk",
+  "sizeBytes": 171887,
+  "sha256": "cbc788ddf243dc6995a1b3a888f1b391af0fdd53155018de5470cbcc008341f7",
+  "notes": [
+    "Pemeriksaan pembaruan di aplikasi",
+    "Ekspor GeoJSON/JSONL untuk MongoDB",
+    "Peta rute offline dan pembersihan data"
+  ],
+  "publishedAt": "2026-11-10T03:14:19Z"
+}

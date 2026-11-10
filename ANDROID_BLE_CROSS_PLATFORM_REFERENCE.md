@@ -1,0 +1,10 @@
+# Rujukan Android untuk BLE lintas platform
+
+- [Bluetooth permissions](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions): pada Android 12/API 31+ operasi scan, advertise, dan koneksi BLE memerlukan izin runtime `BLUETOOTH_SCAN`, `BLUETOOTH_ADVERTISE`, dan `BLUETOOTH_CONNECT` sesuai operasi yang dilakukan. Aplikasi meminta ketiganya saat pengguna mengaktifkan sesi rombongan.
+- [Foreground service types](https://developer.android.com/develop/background-work/services/fgs/service-types) dan [Android 14 foreground service type requirements](https://developer.android.com/about/versions/14/changes/fgs-types-required): Android 14/API 34+ mewajibkan deklarasi permission foreground service per type. `connectedDevice` berlaku untuk interaksi Bluetooth; service ini memakai `location|connectedDevice` hanya saat BLE sesi survey aktif, dengan permission `FOREGROUND_SERVICE_CONNECTED_DEVICE` serta izin Bluetooth runtime.
+- [BluetoothLeAdvertiser API](https://developer.android.com/reference/android/bluetooth/le/BluetoothLeAdvertiser): iklan legacy memiliki batas 31 byte; overload `startAdvertising(settings, advertiseData, scanResponse, callback)` memisahkan iklan utama dari scan response. Aplikasi meletakkan payload 10-byte di Service Data, lalu service UUID 128-bit di scan response supaya app iOS dapat menemukan service tanpa membesarkan paket utama.
+- UUID BLE outing: `9D7A4F80-6F2B-4C21-9A11-4C6572656E67`. UUID characteristic identitas GATT read-only: `1A6CDE71-9D0A-4C4E-A274-4C6572656E67`. Payload 10 byte adalah 6 byte pertama SHA-256 dari kode outing uppercase, lalu 4 byte ID peserta acak. GATT hanya membaca karakteristik itu; tidak ada write, RSSI, alamat perangkat, jarak, atau estimasi lokasi.
+
+## Batas kompatibilitas
+
+iOS CoreBluetooth membatasi iklan iOS dan perlakuan background; lihat detail serta sumber Apple di `../LerengOffline-iOS/IOS_PLATFORM_REFERENCES.md`. Android v2.3 membaca GATT iPhone hanya setelah service UUID dapat ditemukan. Pembatasan iOS pada background dapat membuat deteksi iPhone-ke-Android tertunda atau tidak tersedia; kode tidak dapat menjamin keberhasilan lintas platform ketika layar terkunci.
