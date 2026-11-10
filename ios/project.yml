@@ -1,0 +1,75 @@
+name: LerengOffline
+options:
+  bundleIdPrefix: id.bagas.lerengoffline
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  LerengOffline:
+    type: application
+    platform: iOS
+    sources:
+      - path: LerengOffline
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: id.bagas.lerengoffline.ios
+        PRODUCT_NAME: LerengOffline
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    info:
+      path: LerengOffline/Info.plist
+      properties:
+        CFBundleDisplayName: Lereng Offline
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+        NSLocationWhenInUseUsageDescription: "Lereng Offline merekam jalur pendakian di perangkat ini. Tidak ada unggahan."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Rekaman jalur perlu berlanjut saat layar mati. Data tetap di perangkat."
+        NSBluetoothAlwaysUsageDescription: "BLE hanya bertukar ID samaran dan waktu untuk mencatat siapa yang terlihat di rombongan. Tidak ada jarak, posisi, atau MAC."
+        UIBackgroundModes:
+          - location
+          - bluetooth-central
+          - bluetooth-peripheral
+
+  LerengOfflineTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LerengOfflineTests
+    dependencies:
+      - target: LerengOffline
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: id.bagas.lerengoffline.ios.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LerengOffline.app/LerengOffline"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  LerengOffline:
+    build:
+      targets:
+        LerengOffline: all
+        LerengOfflineTests: [test]
+    test:
+      gatherCoverageData: false
+      targets:
+        - LerengOfflineTests
+    run:
+      config: Debug

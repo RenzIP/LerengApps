@@ -118,3 +118,46 @@ URL kosong = fitur mati.
 - Tombol **Cek pembaruan** di kartu "Tentang aplikasi" memaksa pemeriksaan segera.
 - Pembaruan opsional bisa ditunda 24 jam; pembaruan wajib tidak bisa ditunda.
 - Saat pengguna kembali dari browser tanpa memasang versi baru, dialog wajib muncul lagi.
+
+## iOS (`updates/ios-update.json`)
+
+Aplikasi iOS memakai manifes terpisah dengan skema `lereng.ios-update/1` karena iOS tidak
+dapat memasang IPA sendiri. Aplikasi hanya membuka App Store atau TestFlight.
+
+```json
+{
+  "schema": "lereng.ios-update/1",
+  "build": 2,
+  "version": "1.1.0",
+  "minSupportedBuild": 1,
+  "mandatory": false,
+  "appStoreUrl": "https://apps.apple.com/app/id0000000000",
+  "testFlightUrl": "https://testflight.apple.com/join/00000000",
+  "notes": ["Perbaikan peta rute offline"],
+  "publishedAt": "2026-11-10T00:00:00Z"
+}
+```
+
+| Field | Wajib | Arti |
+| --- | --- | --- |
+| `schema` | ya | Harus `lereng.ios-update/1`. |
+| `build` | ya | `CFBundleVersion` terbaru; harus lebih besar dari build terpasang. |
+| `version` | tidak | Ditampilkan di lembar pembaruan. |
+| `minSupportedBuild` | tidak | Build di bawah nilai ini dipaksa memperbarui. |
+| `mandatory` | tidak | `true` = lembar tidak bisa ditutup. |
+| `appStoreUrl` / `testFlightUrl` | ya (salah satu) | Harus HTTPS. |
+| `notes` | tidak | String atau array string. |
+
+Manifes yang dipublikasikan sekarang memakai `build: 1`, sama dengan build aplikasi, jadi tidak
+ada dialog yang muncul. Ganti URL toko dengan tautan App Store yang sebenarnya setelah aplikasi
+lolos App Review.
+
+## iOS vs Android
+
+| Aspek | Android | iOS |
+| --- | --- | --- |
+| Skema manifes | `lereng.update/1` | `lereng.ios-update/1` |
+| Tindakan | unduh + pasang APK | buka App Store/TestFlight |
+| Pemasangan mandiri | ya (lewat pemasang paket) | tidak (batasan iOS) |
+| Penandatanganan | kunci APK sama | sertifikat Apple, ditangani App Store |
+

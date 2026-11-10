@@ -1,0 +1,14 @@
+{
+  "schema": "lereng.ios-update/1",
+  "build": 1,
+  "version": "1.0.0",
+  "minSupportedBuild": 0,
+  "mandatory": false,
+  "appStoreUrl": "https://apps.apple.com/app/id0000000000",
+  "testFlightUrl": "https://testflight.apple.com/join/00000000",
+  "notes": [
+    "Rilis awal iOS: rekam jalur offline, waypoint, ekspor CSV/GPX/GeoJSON/JSONL",
+    "Kehadiran BLE hanya bertukar ID samaran dan waktu"
+  ],
+  "publishedAt": "2026-11-10T00:00:00Z"
+}

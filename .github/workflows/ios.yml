@@ -1,0 +1,69 @@
+name: iOS
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versi Xcode
+        run: xcodebuild -version
+
+      - name: Pasang XcodeGen
+        run: brew install xcodegen
+
+      - name: Buat proyek Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Bangun aplikasi
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project LerengOffline.xcodeproj \
+            -scheme LerengOffline \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee build.log | tail -n 120
+
+      - name: Uji unit
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project LerengOffline.xcodeproj \
+            -scheme LerengOffline \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            test | tee test.log | tail -n 160
+
+      - name: Simpan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-logs
+          path: |
+            ios/build.log
+            ios/test.log
+          if-no-files-found: ignore

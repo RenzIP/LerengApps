@@ -25,3 +25,10 @@ desktop.ini
 *.ap_
 
 dist/
+
+# iOS / XcodeGen: proyek dan Info.plist dihasilkan ulang, tidak di-commit
+ios/*.xcodeproj
+ios/LerengOffline/Info.plist
+ios/build/
+ios/*.log
+xcuserdata/
