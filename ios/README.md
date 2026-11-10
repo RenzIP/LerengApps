@@ -9,8 +9,9 @@ berkas lokal. Tidak ada unggahan, tidak ada sinkronisasi awan, dan tidak ada kon
 - Kode sumber lengkap, target iOS 16.
 - Proyek Xcode **dibuat** oleh [XcodeGen](https://github.com/yonaskolb/XcodeGen) dari
   `project.yml` — tidak ada `.xcodeproj` yang di-commit, sehingga tidak ada konflik proyek.
-- Dikompilasi dan diuji di GitHub Actions (`macos-14`, simulator iPhone 15) karena tidak ada
-  Mac di mesin pengembangan.
+- Dikompilasi dan diuji di GitHub Actions (`.github/workflows/ios.yml`, runner `macos-latest`,
+  simulator iPhone dipilih otomatis) karena tidak ada Mac di mesin pengembangan. Status terakhir:
+  build sukses, 31 uji unit lulus.
 
 ## Menjalankan di Mac
 
@@ -88,7 +89,8 @@ Untuk menutup celah Android → iOS, `BlePresenceController` di Android perlu me
 2. Di Xcode: *Product → Archive* → *Distribute App* → App Store Connect.
 3. Isi TestFlight untuk penguji internal, lalu ajukan ke App Review untuk publik.
 4. Setelah lolos, perbarui `updates/ios-update.json` dengan URL App Store yang sebenarnya,
-   naikkan `build`, dan setel `mandatory`/`minSupportedBuild` sesuai kebutuhan.
+   naikkan `build`, dan setel `mandatory`/`minSupportedBuild` sesuai kebutuhan. Naikkan juga
+   `CURRENT_PROJECT_VERSION` di `ios/project.yml` agar nomor build cocok.
 
 Kebijakan privasi yang perlu disiapkan untuk App Review: aplikasi mengakses lokasi di latar
 belakang hanya saat merekam, memakai Bluetooth hanya untuk bertukar ID samaran, dan tidak
