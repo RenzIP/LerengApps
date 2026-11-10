@@ -7,10 +7,19 @@ on:
       - ".github/workflows/smoke.yml"
 
 jobs:
-  hello:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - name: Info
         run: |
           echo "hello from ${{ runner.os }}"
           uname -a
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Info
+        run: |
+          echo "hello from ${{ runner.os }}"
+          sw_vers
+          xcodebuild -version
