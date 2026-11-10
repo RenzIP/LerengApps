@@ -45,10 +45,11 @@ final class ExportersTests: XCTestCase {
     func testCsvHeaderAndRows() {
         let csv = Exporters.csv(context([point(offsetSeconds: 0), point(offsetSeconds: 10)]))
         let lines = csv.components(separatedBy: "\r\n").filter { !$0.isEmpty }
-        XCTAssertEqual(lines.count, 3)
+        XCTAssertEqual(lines.count, 4) // 1 header + 2 titik + 1 kehadiran
         XCTAssertTrue(lines[0].hasPrefix("record_type,group_code,participant_id"))
         XCTAssertTrue(lines[1].hasPrefix("track,GUNUNG77,1A2B3C4D"))
-        XCTAssertTrue(lines[2].hasPrefix("presence,GUNUNG77,1A2B3C4D"))
+        XCTAssertTrue(lines[2].hasPrefix("track,GUNUNG77,1A2B3C4D"))
+        XCTAssertTrue(lines[3].hasPrefix("presence,GUNUNG77,1A2B3C4D"))
         XCTAssertTrue(csv.contains("0A0B0C0D"))
     }
 

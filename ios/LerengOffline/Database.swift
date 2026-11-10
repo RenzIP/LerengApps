@@ -256,7 +256,9 @@ final class Database {
         """, [.int(surveyId), .int(time), .text(observer), .text(seen), .text(groupCode),
               .int(time / 30_000)])
         defer { sqlite3_finalize(statement) }
-        return sqlite3_step(statement) == SQLITE_DONE
+        guard sqlite3_step(statement) == SQLITE_DONE else { return false }
+        // INSERT OR IGNORE juga mengembalikan SQLITE_DONE saat baris sudah ada (bucket 30 detik).
+        return sqlite3_changes(handle) > 0
     }
 
     func presence(surveyId: Int64) -> [Presence] {
