@@ -1,0 +1,111 @@
+name: iOS Release
+
+on:
+  push:
+    tags:
+      - "ios-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versi rilis
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#ios-v}" >> "$GITHUB_ENV"
+
+      - name: Pasang XcodeGen
+        run: brew install xcodegen
+
+      - name: Buat proyek Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Bangun untuk perangkat (tanpa tanda tangan)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project LerengOffline.xcodeproj \
+            -scheme LerengOffline \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build-release.log | tail -n 120
+
+      - name: Paket IPA tanpa tanda tangan
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/LerengOffline.app"
+          test -d "$APP" || { echo "Aplikasi tidak ditemukan: $APP" >&2; exit 1; }
+          rm -rf build/ipa
+          mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          (cd build/ipa && zip -qry "../LerengOffline-ios-${VERSION}-unsigned.ipa" Payload)
+          shasum -a 256 "build/LerengOffline-ios-${VERSION}-unsigned.ipa" | tee ipa-sha256.txt
+          unzip -l "build/LerengOffline-ios-${VERSION}-unsigned.ipa" | head -25
+
+      - name: Unggah artefak
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa-${{ github.ref_name }}
+          path: ios/build/LerengOffline-ios-*-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Buat atau perbarui rilis GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FILE="ios/build/LerengOffline-ios-${VERSION}-unsigned.ipa"
+          SHA=$(cat ios/ipa-sha256.txt | awk '{print $1}')
+
+          cat > notes.md <<EOF
+          IPA **tanpa tanda tangan** untuk Lereng Offline iOS ${VERSION}.
+          Tidak ada akun Apple Developer yang dipakai: aplikasi harus ditandatangani ulang
+          dengan Apple ID milikmu sendiri sebelum dipasang.
+
+          ## Cara pasang (Windows atau Mac)
+
+          1. Unduh \`$(basename "$FILE")\` dari halaman rilis ini.
+          2. Pasang [Sideloadly](https://sideloadly.io) (Windows) atau
+             [AltStore](https://altstore.io) (Windows/Mac), lalu sambungkan iPhone lewat kabel.
+          3. Seret berkas IPA ke Sideloadly, masukkan Apple ID biasa (gratis), tekan Start.
+          4. Di iPhone: **Pengaturan → Umum → VPN & Manajemen Perangkat →** percayai sertifikat developer.
+
+          ## Batasan akun Apple gratis
+
+          - Aplikasi berhenti berjalan setelah **7 hari** dan harus ditandatangani ulang.
+            AltStore/SideStore dapat memperbarui otomatis selama masih tersambung.
+          - Maksimal 3 aplikasi sideload per Apple ID.
+          - Tidak ada distribusi massal: setiap orang menandatangani dengan Apple ID-nya sendiri.
+
+          ## Data
+
+          Aplikasi tetap offline: rekaman disimpan di SQLite perangkat, ekspor lewat lembar
+          berbagi iOS. Satu-satunya permintaan jaringan adalah manifes pembaruan JSON.
+
+          SHA-256: \`${SHA}\`
+          EOF
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$FILE" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$FILE" \
+              --title "Lereng Offline iOS ${VERSION} (unsigned IPA)" \
+              --notes-file notes.md
+          fi
+
+      - name: Ringkasan
+        run: |
+          echo "Rilis: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          cat ios/ipa-sha256.txt

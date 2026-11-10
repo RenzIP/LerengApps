@@ -77,13 +77,41 @@ Untuk menutup celah Android → iOS, `BlePresenceController` di Android perlu me
 - Semua kegagalan bersifat fail-open: aplikasi tetap dapat dipakai.
 - `mandatory: true` atau `minSupportedBuild` di atas build terpasang menampilkan lembar yang
   tidak dapat ditutup.
-- iOS **tidak** dapat memasang IPA sendiri. Lembar hanya menautkan ke App Store atau TestFlight.
-  Karena itu `appStoreUrl`/`testFlightUrl` pada `updates/ios-update.json` masih placeholder dan
-  wajib diganti setelah aplikasi tersedia di App Store Connect.
+- iOS **tidak** dapat memasang IPA sendiri, dan tanpa akun berbayar juga tidak ada App Store.
+  Karena itu manifes memakai `downloadUrl` yang menunjuk ke halaman GitHub Release; lembar
+  pembaruan menampilkan tombol "Buka halaman unduhan".
+- `appStoreUrl`/`testFlightUrl` tetap didukung bila kelak aplikasi terbit di toko Apple.
 - Manifest yang dipublikasikan saat ini memakai `build: 1`, sama dengan build aplikasi, sehingga
   tidak menampilkan dialog apa pun.
 
 ## Distribusi
+
+### Tanpa akun Apple Developer (jalur saat ini)
+
+Apple mewajibkan akun berbayar hanya untuk App Store dan TestFlight. Untuk pemakaian sendiri
+dan rombongan kecil, IPA tanpa tanda tangan bisa dipasang dengan Apple ID biasa (gratis) lewat
+Sideloadly atau AltStore.
+
+1. Workflow `.github/workflows/ios-release.yml` membuat IPA tanpa tanda tangan setiap kali tag
+   `ios-v*` di-push, lalu melampirkannya ke GitHub Release.
+2. Unduh IPA dari halaman Release, lalu tanda tangani ulang dengan Apple ID sendiri:
+   - Windows: [Sideloadly](https://sideloadly.io) + Apple Devices/iTunes dari Apple.
+   - Windows/Mac: [AltStore](https://altstore.io) (bisa memperbarui otomatis selama tersambung).
+3. Di iPhone, percayai sertifikat developer di **Pengaturan → Umum → VPN & Manajemen Perangkat**.
+
+Batasan yang tidak bisa diakali tanpa akun berbayar:
+
+| Batas | Akun gratis |
+| --- | --- |
+| Masa berlaku aplikasi | 7 hari, harus ditandatangani ulang |
+| Jumlah aplikasi sideload | 3 per Apple ID |
+| Distribusi ke orang lain | hanya dengan Apple ID masing-masing |
+| TestFlight / App Store | tidak tersedia |
+
+Karena itu, pembaruan iOS tidak bisa dipaksakan seperti Android. Manifes hanya dapat membuka
+halaman unduhan; pengguna tetap harus memasang ulang dari komputer.
+
+### Dengan akun berbayar (opsional, untuk distribusi rapi)
 
 1. Daftar Apple Developer Program, buat App ID `id.bagas.lerengoffline.ios`.
 2. Di Xcode: *Product → Archive* → *Distribute App* → App Store Connect.

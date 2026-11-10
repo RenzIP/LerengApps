@@ -73,13 +73,13 @@ struct UpdateSheet: View {
                 }
 
                 Text(info.mandatory
-                     ? "Versi ini tidak lagi didukung. Pasang pembaruan lewat App Store untuk melanjutkan. Data yang sudah terekam tetap tersimpan di perangkat."
-                     : "iOS tidak memasang aplikasi secara otomatis. Tombol di bawah membuka App Store atau TestFlight.")
+                     ? "Versi ini tidak lagi didukung. Pasang pembaruan untuk melanjutkan. Data yang sudah terekam tetap tersimpan di perangkat."
+                     : "iOS tidak memasang aplikasi secara otomatis. Tombol di bawah membuka halaman unduhan; pasang ulang lewat Sideloadly/AltStore.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
                 Link(destination: info.storeURL) {
-                    Label("Buka App Store / TestFlight", systemImage: "arrow.up.forward.app")
+                    Label("Buka halaman unduhan", systemImage: "arrow.up.forward.app")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

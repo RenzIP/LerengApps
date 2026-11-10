@@ -4,11 +4,11 @@
   "version": "1.0.0",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "appStoreUrl": "https://apps.apple.com/app/id0000000000",
-  "testFlightUrl": "https://testflight.apple.com/join/00000000",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.0.0",
   "notes": [
     "Rilis awal iOS: rekam jalur offline, waypoint, ekspor CSV/GPX/GeoJSON/JSONL",
-    "Kehadiran BLE hanya bertukar ID samaran dan waktu"
+    "Kehadiran BLE hanya bertukar ID samaran dan waktu",
+    "IPA tanpa tanda tangan untuk dipasang dengan Sideloadly/AltStore"
   ],
   "publishedAt": "2026-11-10T00:00:00Z"
 }

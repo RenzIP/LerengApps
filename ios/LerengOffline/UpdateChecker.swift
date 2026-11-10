@@ -148,9 +148,10 @@ enum UpdateChecker {
         return nil
     }
 
-    /// `appStoreUrl` diutamakan; `testFlightUrl` dipakai bila App Store belum tersedia.
+    /// `downloadUrl` dipakai untuk distribusi sideload (GitHub Releases); `appStoreUrl` dan
+    /// `testFlightUrl` dipakai bila aplikasi sudah terbit di toko Apple.
     private static func storeLink(_ root: [String: Any]) -> String? {
-        for key in ["appStoreUrl", "testFlightUrl"] {
+        for key in ["downloadUrl", "appStoreUrl", "testFlightUrl"] {
             let text = (root[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { return text }
         }

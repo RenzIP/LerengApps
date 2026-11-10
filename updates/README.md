@@ -122,7 +122,8 @@ URL kosong = fitur mati.
 ## iOS (`updates/ios-update.json`)
 
 Aplikasi iOS memakai manifes terpisah dengan skema `lereng.ios-update/1` karena iOS tidak
-dapat memasang IPA sendiri. Aplikasi hanya membuka App Store atau TestFlight.
+dapat memasang IPA sendiri. Pada distribusi sideload (tanpa akun Apple Developer), tombol di
+lembar pembaruan membuka halaman GitHub Release.
 
 ```json
 {
@@ -131,8 +132,7 @@ dapat memasang IPA sendiri. Aplikasi hanya membuka App Store atau TestFlight.
   "version": "1.1.0",
   "minSupportedBuild": 1,
   "mandatory": false,
-  "appStoreUrl": "https://apps.apple.com/app/id0000000000",
-  "testFlightUrl": "https://testflight.apple.com/join/00000000",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.1.0",
   "notes": ["Perbaikan peta rute offline"],
   "publishedAt": "2026-11-10T00:00:00Z"
 }
@@ -145,19 +145,32 @@ dapat memasang IPA sendiri. Aplikasi hanya membuka App Store atau TestFlight.
 | `version` | tidak | Ditampilkan di lembar pembaruan. |
 | `minSupportedBuild` | tidak | Build di bawah nilai ini dipaksa memperbarui. |
 | `mandatory` | tidak | `true` = lembar tidak bisa ditutup. |
-| `appStoreUrl` / `testFlightUrl` | ya (salah satu) | Harus HTTPS. |
+| `downloadUrl` / `appStoreUrl` / `testFlightUrl` | ya (salah satu) | Harus HTTPS. Urutan prioritas: `downloadUrl`, lalu `appStoreUrl`, lalu `testFlightUrl`. |
 | `notes` | tidak | String atau array string. |
 
 Manifes yang dipublikasikan sekarang memakai `build: 1`, sama dengan build aplikasi, jadi tidak
-ada dialog yang muncul. Ganti URL toko dengan tautan App Store yang sebenarnya setelah aplikasi
-lolos App Review.
+ada dialog yang muncul. Naikkan `build` (dan `CURRENT_PROJECT_VERSION` di `ios/project.yml`)
+saat merilis IPA baru.
+
+### Rilis IPA tanpa tanda tangan
+
+```bash
+git tag ios-v1.0.0
+git push origin ios-v1.0.0
+```
+
+Workflow `iOS Release` membangun aplikasi untuk perangkat, membungkusnya menjadi
+`Payload/LerengOffline.app` + zip (IPA), lalu membuat GitHub Release dengan berkas itu sebagai
+aset. IPA tersebut **belum ditandatangani**; pengguna memasangnya dengan Sideloadly/AltStore
+memakai Apple ID gratis mereka sendiri (masa berlaku 7 hari).
 
 ## iOS vs Android
 
 | Aspek | Android | iOS |
 | --- | --- | --- |
 | Skema manifes | `lereng.update/1` | `lereng.ios-update/1` |
-| Tindakan | unduh + pasang APK | buka App Store/TestFlight |
+| Tindakan | unduh + pasang APK | buka halaman unduhan / toko |
 | Pemasangan mandiri | ya (lewat pemasang paket) | tidak (batasan iOS) |
-| Penandatanganan | kunci APK sama | sertifikat Apple, ditangani App Store |
+| Distribusi | GitHub Release APK | GitHub Release IPA tanpa tanda tangan, atau App Store |
+| Penandatanganan | kunci APK sama | Apple ID pengguna (gratis, 7 hari) atau sertifikat Apple |
 

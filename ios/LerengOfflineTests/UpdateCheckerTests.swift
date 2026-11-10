@@ -66,6 +66,20 @@ final class UpdateCheckerTests: XCTestCase {
         }
     }
 
+    func testDownloadUrlPreferredForSideload() throws {
+        let data = (try? JSONSerialization.data(withJSONObject: [
+            "schema": UpdateChecker.schema,
+            "build": 7,
+            "version": "1.2.0",
+            "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.2.0",
+            "appStoreUrl": "https://apps.apple.com/app/id0000000000",
+            "notes": ["Perbaikan BLE"]
+        ])) ?? Data()
+        let info = try XCTUnwrap(try UpdateChecker.parse(data, currentBuild: 1))
+        XCTAssertEqual(info.storeURL.absoluteString, "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.2.0")
+        XCTAssertEqual(info.version, "1.2.0")
+    }
+
     func testInsecureStoreLinkThrows() {
         XCTAssertThrowsError(try UpdateChecker.parse(manifest(build: 9, store: "http://example.com/app"),
                                                      currentBuild: 1)) { error in
