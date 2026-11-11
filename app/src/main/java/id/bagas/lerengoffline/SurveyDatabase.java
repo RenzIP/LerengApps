@@ -260,7 +260,9 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
 
     public synchronized long ensureDefaultSurvey() {
         SQLiteDatabase db = getWritableDatabase();
-        try (Cursor c = db.rawQuery("SELECT _id FROM surveys ORDER BY _id LIMIT 1", null)) {
+        // Proyek terbaru, bukan yang paling tua: pengguna membuka aplikasi untuk
+        // outing yang sedang berjalan, dan daftar proyek juga diurutkan terbaru dulu.
+        try (Cursor c = db.rawQuery("SELECT _id FROM surveys ORDER BY created_at DESC, _id DESC LIMIT 1", null)) {
             if (c.moveToFirst()) return c.getLong(0);
         }
         ContentValues values = new ContentValues();
@@ -310,18 +312,29 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
     }
 
     public synchronized void setGroupProfile(long surveyId, String groupCode, String participantId, String participantAlias) {
+        String code = safe(groupCode).trim().toUpperCase(Locale.ROOT);
+        String id = safe(participantId);
+        String alias = safe(participantAlias).trim();
+        // Jangan menulis ulang seluruh tabel bila nilainya tidak berubah. Fungsi
+        // ini dipanggil setiap kali waypoint diambil, dan UPDATE massal di jalur
+        // UI membuat aplikasi membeku pada proyek dengan ribuan titik.
+        Survey existing = getSurvey(surveyId);
+        if (existing != null && code.equals(existing.groupCode)
+                && id.equals(existing.participantId) && alias.equals(existing.participantAlias)) {
+            return;
+        }
         ContentValues v = new ContentValues();
-        v.put("group_code", safe(groupCode).trim().toUpperCase(Locale.ROOT));
-        v.put("participant_id", safe(participantId));
-        v.put("participant_alias", safe(participantAlias).trim());
+        v.put("group_code", code);
+        v.put("participant_id", id);
+        v.put("participant_alias", alias);
         getWritableDatabase().update("surveys", v, "_id=?", new String[]{String.valueOf(surveyId)});
         ContentValues codeOnly = new ContentValues();
-        codeOnly.put("group_code", safe(groupCode).trim().toUpperCase(Locale.ROOT));
+        codeOnly.put("group_code", code);
         getWritableDatabase().update("points", codeOnly, "survey_id=?", new String[]{String.valueOf(surveyId)});
         getWritableDatabase().update("presence", codeOnly, "survey_id=?", new String[]{String.valueOf(surveyId)});
         ContentValues legacy = new ContentValues();
-        legacy.put("participant_id", safe(participantId));
-        legacy.put("participant_alias", safe(participantAlias).trim());
+        legacy.put("participant_id", id);
+        legacy.put("participant_alias", alias);
         getWritableDatabase().update("points", legacy, "survey_id=? AND (participant_id IS NULL OR participant_id='')", new String[]{String.valueOf(surveyId)});
     }
 
@@ -528,6 +541,9 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
         try {
             db.delete("presence", "survey_id=?", new String[]{String.valueOf(surveyId)});
             db.delete("points", "survey_id=?", new String[]{String.valueOf(surveyId)});
+            // Hapus eksplisit: jangan bergantung pada cascade FK, karena
+            // reference_points hanya ikut terhapus bila PRAGMA foreign_keys aktif.
+            db.delete("reference_tracks", "survey_id=?", new String[]{String.valueOf(surveyId)});
             int n = db.delete("surveys", "_id=?", new String[]{String.valueOf(surveyId)});
             db.setTransactionSuccessful();
             return n;

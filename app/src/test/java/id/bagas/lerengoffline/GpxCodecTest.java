@@ -121,6 +121,23 @@ public final class GpxCodecTest {
         assertNull(GpxCodec.parseTime("kemarin"));
     }
 
+    @Test public void timeWithoutOffsetIsReadAsUtcNotDeviceZone() {
+        // GPX 1.1: <time> tanpa offset tetap UTC. Kalau dibaca sebagai zona
+        // perangkat, seluruh jalur bergeser (7 jam di WIB) dan impor ulang
+        // terlihat sebagai titik baru.
+        assertEquals(Long.valueOf(T), GpxCodec.parseTime("2026-11-08T01:02:03"));
+    }
+
+    @Test public void parseAcceptsRoutePoints() throws Exception {
+        String xml = "<?xml version=\"1.0\"?><gpx version=\"1.1\" creator=\"uji\">"
+                + "<rte><rtept lat=\"-7.1\" lon=\"110.1\"><ele>900</ele><name>A</name></rtept>"
+                + "<rtept lat=\"-7.2\" lon=\"110.2\"><ele>950</ele><name>B</name></rtept></rte></gpx>";
+        GpxCodec.Result result = GpxCodec.parse(stream(xml));
+        assertEquals(2, result.points.size());
+        assertFalse("rtept adalah titik jalur, bukan waypoint", result.points.get(0).waypoint);
+        assertEquals(-7.2, result.points.get(1).latitude, 1e-9);
+    }
+
     private static SurveyDatabase.Point point(long time, double lat, double lon, Double elevation,
                                               boolean waypoint, String label) {
         return new SurveyDatabase.Point(1, time, lat, lon, elevation, 5f, 8f, null, null,

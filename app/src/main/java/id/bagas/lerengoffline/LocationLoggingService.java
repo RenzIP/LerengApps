@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -39,6 +40,10 @@ public final class LocationLoggingService extends Service implements LocationLis
     public static final String ACTION_START = "id.bagas.lerengoffline.START_LOGGING";
     public static final String ACTION_STOP = "id.bagas.lerengoffline.STOP_LOGGING";
     public static final String ACTION_UPDATED = "id.bagas.lerengoffline.DATA_UPDATED";
+    /** Dikirim ketika perekaman gagal dimulai (izin dicabut atau tidak ada provider). */
+    public static final String ACTION_FAILED = "id.bagas.lerengoffline.RECORDING_FAILED";
+    /** Dikirim ketika sudah lama tidak ada titik baru, supaya UI tidak diam saja. */
+    public static final String ACTION_NO_FIX = "id.bagas.lerengoffline.NO_FIX";
     public static final String EXTRA_SURVEY_ID = "survey_id";
     public static final String EXTRA_GROUP_CODE = "group_code";
     public static final String EXTRA_PARTICIPANT_ID = "participant_id";
@@ -72,7 +77,7 @@ public final class LocationLoggingService extends Service implements LocationLis
     private ConnectivityManager.NetworkCallback networkCallback;
     private boolean networkCallbackRegistered;
     private boolean internetAvailable;
-    private long lastSavedAt = 0;
+    private long lastSaveElapsed = 0;
     private long lastSavedLocationTime = 0;
     private boolean registered;
     private boolean saveScheduled;
@@ -80,6 +85,29 @@ public final class LocationLoggingService extends Service implements LocationLis
     private FusedLocationProviderClient fusedClient;
     private boolean fusedActive;
     private final Handler locationHandler = new Handler(Looper.getMainLooper());
+    /** Jeda pemeriksaan "apakah masih ada titik baru". */
+    private static final long FIX_WATCHDOG_MS = 60_000L;
+    /** Dianggap macet bila tidak ada titik tersimpan selama ini. */
+    private static final long FIX_STALL_MS = 120_000L;
+
+    /**
+     * Peringatan diam-diam adalah bug: kalau GPS tidak memberi fix (di dalam
+     * tenda, GPS dimatikan, izin dicabut), pengguna tidak tahu apa pun sampai
+     * pulang. Pengawas ini memberi tahu setelah dua menit tanpa titik baru.
+     */
+    private final Runnable fixWatchdog = new Runnable() {
+        @Override public void run() {
+            if (!isLogging) return;
+            long sinceLastSave = lastSaveElapsed == 0
+                    ? Long.MAX_VALUE
+                    : SystemClock.elapsedRealtime() - lastSaveElapsed;
+            if (sinceLastSave > FIX_STALL_MS) {
+                updateNotification("Belum ada titik baru lebih dari 2 menit. Periksa GPS dan ruang terbuka.");
+                sendBroadcast(new Intent(ACTION_NO_FIX).setPackage(getPackageName()));
+            }
+            locationHandler.postDelayed(this, FIX_WATCHDOG_MS);
+        }
+    };
 
     @Override public void onCreate() {
         super.onCreate();
@@ -120,10 +148,31 @@ public final class LocationLoggingService extends Service implements LocationLis
             startForeground(NOTIFICATION_ID, notification);
         }
         activeSurveyId = surveyId;
-        isLogging = true;
         registerConnectivityMonitor();
         beginLocationUpdates();
-        if (intent.getBooleanExtra(EXTRA_BLE_ENABLED, false) && BleGroupCodec.isValidGroupCode(groupCode)) {
+        if (!registered) {
+            // Jangan mengaku merekam tanpa sumber lokasi. Dulu layanan tetap
+            // menyalakan notifikasi "sedang merekam" padahal tidak ada titik
+            // yang akan pernah tersimpan.
+            isLogging = false;
+            activeSurveyId = -1;
+            unregisterConnectivityMonitor();
+            sendBroadcast(new Intent(ACTION_FAILED).setPackage(getPackageName()));
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        isLogging = true;
+        locationHandler.postDelayed(fixWatchdog, FIX_WATCHDOG_MS);
+        boolean bleEnabled = intent.getBooleanExtra(EXTRA_BLE_ENABLED, false)
+                && BleGroupCodec.isValidGroupCode(groupCode);
+        if (bleController != null) {
+            // Perintah mulai kedua tidak boleh meninggalkan pemindai lama hidup:
+            // dulu presence tercatat ganda dan baterai terpakai dua kali.
+            bleController.stop();
+            bleController = null;
+        }
+        if (bleEnabled) {
             bleController = new BlePresenceController(this, database, surveyId, groupCode, participantId,
                     new BlePresenceController.Listener() {
                         @Override public void onStatus(String status) { updateNotification(status); }
@@ -266,17 +315,21 @@ public final class LocationLoggingService extends Service implements LocationLis
             latestNetworkFix = new Location(location);
         }
         else return;
-        long now = System.currentTimeMillis();
-        if (now - lastSavedAt < SAVE_INTERVAL_MS || saveScheduled) return;
+        // Jeda antar titik memakai jam monoton. Kalau memakai jam dinding,
+        // perubahan zona waktu atau koreksi NTP bisa membekukan penyimpanan
+        // sampai jam perangkat mengejar nilai lama.
+        if (SystemClock.elapsedRealtime() - lastSaveElapsed < SAVE_INTERVAL_MS || saveScheduled) return;
         saveScheduled = true;
         locationHandler.postDelayed(this::saveBestFix, 800L);
     }
 
-    private void saveBestFix() {
+    private void saveBestFix() { saveBestFix(false); }
+
+    private void saveBestFix(boolean force) {
         saveScheduled = false;
         if (!isLogging || surveyId < 0) return;
         long now = System.currentTimeMillis();
-        if (now - lastSavedAt < SAVE_INTERVAL_MS) return;
+        if (!force && SystemClock.elapsedRealtime() - lastSaveElapsed < SAVE_INTERVAL_MS) return;
         Location location = chooseBestFreshFix(now);
         if (location == null) return;
         if (location.hasAccuracy() && location.getAccuracy() > MAX_HORIZONTAL_ACCURACY_METERS) {
@@ -297,8 +350,14 @@ public final class LocationLoggingService extends Service implements LocationLis
                 verticalAccuracy, pressureHpa, getRelativeAltitude(), source, note,
                 participantId, participantAlias, groupCode, false);
         try {
-            database.addPoint(p);
-            lastSavedAt = now;
+            boolean saved = database.addPoint(p);
+            if (!saved) {
+                // Duplikat atau proyek sudah dihapus: jangan memperbarui tanda
+                // waktu seolah titik baru tersimpan.
+                updateNotification("Titik ini sudah tersimpan; dilewati.");
+                return;
+            }
+            lastSaveElapsed = SystemClock.elapsedRealtime();
             lastSavedLocationTime = location.getTime();
             sendBroadcast(new Intent(ACTION_UPDATED).setPackage(getPackageName()));
             scheduleSync(20000);
@@ -343,13 +402,16 @@ public final class LocationLoggingService extends Service implements LocationLis
      * Tanpa batas ini, setiap titik akan menumpuk permintaan jaringan.
      */
     private void scheduleSync(long delayMs) {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (now - lastSyncRequestAt < 60000L) return;
         lastSyncRequestAt = now;
         MongoSyncScheduler.requestSync(this, delayMs);
     }
 
     private void stopLogging() {
+        // Simpan fix terakhir sebelum berhenti. Tanpa ini, titik paling akhir
+        // (sering kali puncak) hilang karena antrean simpan dibatalkan.
+        if (isLogging) saveBestFix(true);
         locationHandler.removeCallbacksAndMessages(null);
         saveScheduled = false;
         // Kirim sisa data segera; rekaman berhenti tetapi data tetap tersimpan lokal.
@@ -414,9 +476,18 @@ public final class LocationLoggingService extends Service implements LocationLis
         locationHandler.removeCallbacksAndMessages(null);
         unregisterConnectivityMonitor();
         if (bleController != null) { bleController.stop(); bleController = null; }
+        // Fused request harus dilepas di sini juga, bukan hanya di stopLogging:
+        // layanan bisa dihentikan sistem tanpa melewati jalur itu, dan permintaan
+        // lokasi yang tertinggal terus membangunkan perangkat.
+        if (fusedClient != null) {
+            try { fusedClient.removeLocationUpdates(fusedCallback); } catch (RuntimeException ignored) {}
+            fusedClient = null;
+        }
+        fusedActive = false;
         if (registered && locationManager != null) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) {}
         }
+        registered = false;
         if (sensorManager != null) sensorManager.unregisterListener(this);
         isLogging = false;
         activeSurveyId = -1;

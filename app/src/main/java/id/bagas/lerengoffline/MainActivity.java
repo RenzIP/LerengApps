@@ -88,6 +88,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private static final int REQ_IMPORT_REFERENCE_GPX = 111;
     private static final String PREFS_EXPORT = "lereng_export";
     private static final String PREFS_UPDATE = "lereng_update";
+    /** Mengingat proyek terakhir supaya aplikasi membuka outing yang sedang dipakai. */
+    private static final String PREFS_UI = "lereng_ui";
+    private static final String KEY_LAST_SURVEY = "last_survey_id";
     private static final long UPDATE_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L;
     private static final long UPDATE_SNOOZE_MS = 24L * 60L * 60L * 1000L;
 
@@ -168,9 +171,37 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private long cachedElevationDatasetId = -1;
     private SurveyDatabase.ElevationDataset cachedElevationDataset;
     private LocalElevationEngine.Index cachedElevationIndex;
+    /**
+     * Nomor permintaan terakhir untuk terrain dan profil. Setiap titik baru
+     * memicu hitung ulang; tanpa penanda ini antrean pada executor tunggal
+     * menumpuk dan perangkat terasa panas serta UI tersendat saat merekam.
+     */
+    private final java.util.concurrent.atomic.AtomicLong terrainRequest =
+            new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong profileRequest =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private final BroadcastReceiver dataReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context context, Intent intent) { refreshAll(); }
+        @Override public void onReceive(Context context, Intent intent) {
+            if (LocationLoggingService.ACTION_FAILED.equals(intent.getAction())) {
+                startingRecording = false;
+                syncRecordingControls();
+                if (recordText != null) recordText.setText(
+                        "Perekaman tidak dapat dimulai: tidak ada sumber lokasi. Periksa izin lokasi presisi dan pastikan GPS aktif.");
+                Toast.makeText(MainActivity.this,
+                        "Perekaman gagal dimulai: periksa izin lokasi presisi dan GPS.",
+                        Toast.LENGTH_LONG).show();
+                updateStatusChips();
+                return;
+            }
+            if (LocationLoggingService.ACTION_NO_FIX.equals(intent.getAction())) {
+                if (recordText != null) recordText.setText(
+                        "Belum ada titik baru lebih dari 2 menit. GPS mungkin belum mendapat fix: coba area terbuka, atau periksa apakah GPS aktif dan izin lokasi masih diberikan.");
+                updateStatusChips();
+                return;
+            }
+            refreshAll();
+        }
     };
 
     private final BroadcastReceiver syncReceiver = new BroadcastReceiver() {
@@ -196,7 +227,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 nightMode ? 0 : View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
 
         buildScreen();
-        selectedSurveyId = database.ensureDefaultSurvey();
+        long remembered = getSharedPreferences(PREFS_UI, MODE_PRIVATE).getLong(KEY_LAST_SURVEY, -1);
+        selectedSurveyId = remembered > 0 ? remembered : database.ensureDefaultSurvey();
         if (LocationLoggingService.isLogging && LocationLoggingService.activeSurveyId > 0)
             selectedSurveyId = LocationLoggingService.activeSurveyId;
         reloadSurveys(selectedSurveyId);
@@ -446,12 +478,12 @@ public final class MainActivity extends Activity implements LocationListener, Se
         permissionButton = UiKit.button(this, "Aktifkan lokasi", UiKit.STYLE_SECONDARY, R.drawable.ic_gps);
         permissionButton.setOnClickListener(v -> requestLocationAccess());
         statusCard.addView(permissionButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48), 0, 11, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 11, 0, 0));
         UiKit.addCard(page, statusCard, 0);
 
         LinearLayout recordCard = UiKit.card(this);
         recordCard.addView(UiKit.cardHeader(this, R.drawable.ic_record, "Perekaman", null));
-        recordText = UiKit.body(this, "Perekaman berhenti. Titik lokasi disimpan lokal kira-kira tiap 10 detik.");
+        recordText = UiKit.body(this, "Perekaman berhenti. Titik lokasi disimpan lokal kira-kira tiap 5 detik.");
         recordCard.addView(recordText, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 9, 0, 0));
 
@@ -461,10 +493,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         stopButton = UiKit.button(this, "Hentikan", UiKit.STYLE_DANGER, R.drawable.ic_stop);
         startButton.setOnClickListener(v -> startRecording());
         stopButton.setOnClickListener(v -> stopRecording());
-        LinearLayout.LayoutParams startParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        LinearLayout.LayoutParams startParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         startParams.rightMargin = dp(8);
         recordActions.addView(startButton, startParams);
-        recordActions.addView(stopButton, new LinearLayout.LayoutParams(0, dp(50), 1f));
+        recordActions.addView(stopButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         recordCard.addView(recordActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 13, 0, 0));
 
@@ -485,10 +517,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         Button waypointButton = UiKit.button(this, "Waypoint", UiKit.STYLE_ACCENT, R.drawable.ic_flag);
         captureButton.setOnClickListener(v -> captureManualPoint());
         waypointButton.setOnClickListener(v -> captureWaypoint());
-        LinearLayout.LayoutParams captureParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams captureParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         captureParams.rightMargin = dp(8);
         captureActions.addView(captureButton, captureParams);
-        captureActions.addView(waypointButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        captureActions.addView(waypointButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         captureCard.addView(captureActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         UiKit.addCard(page, captureCard, 12);
@@ -502,7 +534,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         groupButton = UiKit.button(this, "Atur kode & alias", UiKit.STYLE_SECONDARY, R.drawable.ic_settings);
         groupButton.setOnClickListener(v -> showGroupDialog());
         groupCard.addView(groupButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(48), 0, 11, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 11, 0, 0));
         presenceText = UiKit.caption(this, "Belum ada deteksi BLE tersimpan.");
         groupCard.addView(presenceText, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
@@ -526,10 +558,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         Button deleteLastButton = UiKit.button(this, "Hapus terakhir", UiKit.STYLE_GHOST, R.drawable.ic_trash);
         viewAllButton.setOnClickListener(v -> showPointList());
         deleteLastButton.setOnClickListener(v -> deleteLastTrackPoint());
-        LinearLayout.LayoutParams viewAllParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        LinearLayout.LayoutParams viewAllParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         viewAllParams.rightMargin = dp(8);
         recentActions.addView(viewAllButton, viewAllParams);
-        recentActions.addView(deleteLastButton, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        recentActions.addView(deleteLastButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         recentCard.addView(recentActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         UiKit.addCard(page, recentCard, 12);
@@ -570,7 +602,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         Button resetMapButton = UiKit.button(this, "Reset tampilan peta", UiKit.STYLE_GHOST, R.drawable.ic_layers);
         resetMapButton.setOnClickListener(v -> mapView.resetView());
         mapCard.addView(resetMapButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(44), 0, 6, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
         UiKit.addCard(page, mapCard, 0);
 
         LinearLayout referenceCard = UiKit.card(this);
@@ -591,10 +623,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         referenceDeleteButton = UiKit.button(this, "Hapus", UiKit.STYLE_GHOST, R.drawable.ic_trash);
         referenceImportButton.setOnClickListener(v -> importReferenceGpx());
         referenceDeleteButton.setOnClickListener(v -> confirmDeleteReferenceTrack());
-        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         importParams.rightMargin = dp(8);
         referenceActions.addView(referenceImportButton, importParams);
-        referenceActions.addView(referenceDeleteButton, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        referenceActions.addView(referenceDeleteButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         referenceCard.addView(referenceActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         UiKit.addCard(page, referenceCard, 12);
@@ -725,10 +757,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         exportButton.setOnClickListener(v -> beginExport(false));
         LinearLayout exportRow = new LinearLayout(this);
         exportRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         importParams.rightMargin = dp(8);
         exportRow.addView(importButton, importParams);
-        exportRow.addView(exportButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        exportRow.addView(exportButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         exportCard.addView(exportRow, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
 
@@ -738,10 +770,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         gpxImportButton.setOnClickListener(v -> importGpx());
         LinearLayout gpxRow = new LinearLayout(this);
         gpxRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams gpxExportParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams gpxExportParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         gpxExportParams.rightMargin = dp(8);
         gpxRow.addView(gpxExportButton, gpxExportParams);
-        gpxRow.addView(gpxImportButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        gpxRow.addView(gpxImportButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         exportCard.addView(gpxRow, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
@@ -749,13 +781,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 UiKit.STYLE_GHOST, R.drawable.ic_route);
         geojsonButton.setOnClickListener(v -> beginExport(true));
         exportCard.addView(geojsonButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 8, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
         Button jsonlButton = UiKit.button(this, "Ekspor JSONL untuk MongoDB",
                 UiKit.STYLE_GHOST, R.drawable.ic_database);
         jsonlButton.setOnClickListener(v -> beginJsonLinesExport());
         exportCard.addView(jsonlButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 8, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
         exportCard.addView(UiKit.divider(this), UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(1), 0, 14, 0, 0));
@@ -788,10 +820,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         selectElevationButton.setOnClickListener(v -> chooseElevationDataset());
         LinearLayout datasetRow = new LinearLayout(this);
         datasetRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams importElevationParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams importElevationParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         importElevationParams.rightMargin = dp(8);
         datasetRow.addView(importElevationButton, importElevationParams);
-        datasetRow.addView(selectElevationButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        datasetRow.addView(selectElevationButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         datasetCard.addView(datasetRow, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
 
@@ -801,7 +833,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (deleteDrawables[0] != null) deleteDrawables[0].setTint(getColor(R.color.danger));
         deleteElevationButton.setOnClickListener(v -> deleteActiveElevationDataset());
         datasetCard.addView(deleteElevationButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 8, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
         UiKit.addCard(page, datasetCard, 12);
 
         LinearLayout projectCard = UiKit.card(this);
@@ -822,10 +854,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         deleteProjectButton.setOnClickListener(v -> confirmDeleteSurvey());
         LinearLayout projectActions = new LinearLayout(this);
         projectActions.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams renameParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        LinearLayout.LayoutParams renameParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         renameParams.rightMargin = dp(8);
         projectActions.addView(renameButton, renameParams);
-        projectActions.addView(deleteProjectButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        projectActions.addView(deleteProjectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         projectCard.addView(projectActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         UiKit.addCard(page, projectCard, 12);
@@ -859,7 +891,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 UiKit.STYLE_GHOST, R.drawable.ic_update);
         updateButton.setOnClickListener(v -> checkForUpdate(true));
         aboutCard.addView(updateButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 10, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
         UiKit.addCard(page, aboutCard, 12);
 
@@ -936,7 +968,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             advancedButton.setOnClickListener(v -> advanced.setVisibility(
                     advanced.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
             card.addView(advancedButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(44), 0, 4, 0, 0));
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0));
         }
         card.addView(advanced, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0));
@@ -944,7 +976,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         Button saveButton = UiKit.button(this, "Simpan pengaturan", UiKit.STYLE_SECONDARY, R.drawable.ic_settings);
         saveButton.setOnClickListener(v -> saveSyncSettings());
         advanced.addView(saveButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 10, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
         syncStatusText = UiKit.text(this, "Belum diatur.", 13.5f, R.color.warning, Typeface.BOLD);
         syncStatusText.setLineSpacing(dp(2), 1f);
@@ -986,7 +1018,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             }
         });
         advanced.addView(clearButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 6, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
 
         MongoSync.Config config = MongoSync.load(this);
         if (config != null) {
@@ -1119,11 +1151,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         bar.addView(bottomWaypoint, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         bottomPrimary = UiKit.button(this, "Mulai", UiKit.STYLE_PRIMARY, R.drawable.ic_record);
+        bottomPrimary.setMinimumWidth(dp(120));
         bottomPrimary.setOnClickListener(v -> {
             if (LocationLoggingService.isLogging) stopRecording();
             else startRecording();
         });
-        bar.addView(bottomPrimary, UiKit.lp(this, dp(128), dp(48), 6, 0, 0, 0));
+        bar.addView(bottomPrimary, UiKit.lp(this, LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 6, 0, 0, 0));
 
         shell.addView(bar);
         return shell;
@@ -1204,6 +1238,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 break;
             }
         }
+        getSharedPreferences(PREFS_UI, MODE_PRIVATE).edit()
+                .putLong(KEY_LAST_SURVEY, selectedSurveyId).apply();
         updateProjectHeader();
     }
 
@@ -1239,7 +1275,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(20), dp(4), dp(20), 0);
-        form.addView(input, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(50)));
+        form.addView(input, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         new AlertDialog.Builder(this)
                 .setTitle("Ganti nama proyek")
                 .setMessage("Nama hanya mengubah label proyek; track, waypoint, dan dataset tidak berubah.")
@@ -1462,14 +1498,14 @@ public final class MainActivity extends Activity implements LocationListener, Se
         code.setFilters(new InputFilter[]{new InputFilter.LengthFilter(16)});
         code.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         code.setText(s.groupCode);
-        form.addView(code, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(50)));
+        form.addView(code, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         TextView aliasLabel = UiKit.caption(this, "Alias peserta (hanya untuk file lokal/ekspor)");
         form.addView(aliasLabel, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
         EditText alias = UiKit.input(this, "Contoh: Pendaki 1");
         alias.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
         alias.setText(s.participantAlias);
-        form.addView(alias, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, dp(50), 0, 6, 0, 0));
+        form.addView(alias, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
         form.addView(UiKit.caption(this, "ID samaran per outing: " + s.participantId
                         + ". BLE menyiarkan tag hash kode + ID acak saja; bukan nama atau data track."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1645,7 +1681,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (groupButton != null) groupButton.setEnabled(!logging);
 
         if (bottomPrimary != null) {
-            bottomPrimary.setText(logging ? "Stop" : "Mulai");
+            bottomPrimary.setText(logging ? "Hentikan" : "Mulai");
             bottomPrimary.setCompoundDrawablesRelativeWithIntrinsicBounds(
                     logging ? R.drawable.ic_stop : R.drawable.ic_record, 0, 0, 0);
             UiKit.styleButton(this, bottomPrimary, logging ? UiKit.STYLE_DANGER : UiKit.STYLE_PRIMARY);
@@ -1770,7 +1806,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(20), dp(4), dp(20), 0);
         form.addView(input, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)));
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         new AlertDialog.Builder(this).setTitle("Label waypoint")
                 .setMessage("Waypoint akan ditandai pada profil jalur dan diekspor bersama track.")
                 .setView(form).setNegativeButton("Batal", null)
@@ -1879,7 +1915,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
         else if (s.groupCode.isEmpty()) groupText.setText("BLE nonaktif • ID peserta outing: " + s.participantId + " • alias: " + (s.participantAlias.isEmpty() ? "belum diatur" : s.participantAlias));
         else groupText.setText("Kode outing: " + s.groupCode + " • ID samaran: " + s.participantId + " • alias: " + s.participantAlias);
         groupButton.setEnabled(!LocationLoggingService.isLogging);
-        List<SurveyDatabase.Presence> events = database.getPresence(selectedSurveyId);        Set<String> peers = new HashSet<>();
+        List<SurveyDatabase.Presence> events = database.getPresence(selectedSurveyId);
+        Set<String> peers = new HashSet<>();
         long latest = 0;
         for (SurveyDatabase.Presence event : events) {
             if (!event.participantId.equalsIgnoreCase(s.participantId)) peers.add(event.participantId);
@@ -2006,7 +2043,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (terrainExecutor().isShutdown() || terrainStatus == null) return;
         terrainStatus.setText("Menghitung coverage terrain lokal…");
         long datasetId = database.getSurveyElevationDatasetId(surveyId);
+        final long requestId = terrainRequest.incrementAndGet();
         profileExecutor.execute(() -> {
+            // Permintaan yang sudah basi dilewati, bukan dihitung lalu dibuang.
+            if (requestId != terrainRequest.get()) return;
             List<TerrainEngine.Sample> samples = new ArrayList<>();
             String datum = "unknown";
             if (datasetId >= 0) {
@@ -2042,6 +2082,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             final TerrainEngine.Result r = TerrainEngine.build(samples, datum, 0);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || selectedSurveyId != surveyId) return;
+                if (requestId != terrainRequest.get()) return;
                 terrainView.setResult(r);
                 if (mapView != null) mapView.setTerrain(r);
                 if (mapStatus != null) {
@@ -2076,7 +2117,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (profileExecutor.isShutdown()) return;
         profileText.setText("Menghitung profil jalur satu rute…");
         long datasetId = database.getSurveyElevationDatasetId(surveyId);
+        final long requestId = profileRequest.incrementAndGet();
         profileExecutor.execute(() -> {
+            if (requestId != profileRequest.get()) return;
             RouteProfileEngine.Profile profile = RouteProfileEngine.build(snapshot, datasetId >= 0);
             if (datasetId >= 0) {
                 if (cachedElevationDatasetId != datasetId) {
@@ -2101,6 +2144,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             final SurveyDatabase.ElevationDataset diagnosticDataset = datasetId >= 0 ? database.getElevationDataset(datasetId) : null;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || selectedSurveyId != surveyId) return;
+                if (requestId != profileRequest.get()) return;
                 profileView.setProfile(completedProfile);
                 boolean hasProfile = completedProfile.stations.size() >= 2;
                 if (statDistance != null) {
@@ -2162,11 +2206,11 @@ public final class MainActivity extends Activity implements LocationListener, Se
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(20), dp(4), dp(20), 0);
         form.addView(UiKit.caption(this, "Nama dataset"));
-        form.addView(nameInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, dp(50), 0, 6, 0, 0));
+        form.addView(nameInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
         form.addView(UiKit.caption(this, "Datum elevasi dari sumber (tidak dikonversi)"),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
-        form.addView(datumInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, dp(50), 0, 6, 0, 0));
+        form.addView(datumInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
         new AlertDialog.Builder(this).setTitle("Impor dataset elevasi milikmu")
                 .setMessage("CSV harus memiliki kolom latitude, longitude, elevation_m. Sampel akan disalin ke database lokal perangkat; file tidak diunggah.")
                 .setView(form).setNegativeButton("Batal", null)
@@ -3247,6 +3291,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
     @Override protected void onResume() {
         super.onResume();
         IntentFilter filter = new IntentFilter(LocationLoggingService.ACTION_UPDATED);
+        filter.addAction(LocationLoggingService.ACTION_FAILED);
+        filter.addAction(LocationLoggingService.ACTION_NO_FIX);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(dataReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(dataReceiver, filter);
         receiverRegistered = true;

@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -235,6 +235,9 @@ public final class GpxCodec {
 
         List<Element> elements = new ArrayList<>();
         collect(root, "trkpt", elements);
+        // Sebagian aplikasi mengekspor jalur sebagai rute (<rtept>), bukan track.
+        // Tanpa ini file yang sah ditolak sebagai "tidak ada titik".
+        collect(root, "rtept", elements);
         collect(root, "wpt", elements);
 
         List<ParsedPoint> points = new ArrayList<>(elements.size());
@@ -318,7 +321,10 @@ public final class GpxCodec {
         String clean = value.trim();
         try { return Instant.parse(clean).toEpochMilli(); } catch (DateTimeParseException ignored) {}
         try { return OffsetDateTime.parse(clean).toInstant().toEpochMilli(); } catch (DateTimeParseException ignored) {}
-        try { return LocalDateTime.parse(clean).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(); }
+        // GPX 1.1 mewajibkan waktu UTC. Timestamp tanpa offset karena itu dibaca
+        // sebagai UTC, bukan zona perangkat: memakai zona perangkat menggeser
+        // seluruh jalur 7 jam di Indonesia dan membuat impor ulang terlihat baru.
+        try { return LocalDateTime.parse(clean).toInstant(ZoneOffset.UTC).toEpochMilli(); }
         catch (DateTimeParseException ignored) {}
         try { return Long.parseLong(clean); } catch (NumberFormatException ignored) {}
         return null;

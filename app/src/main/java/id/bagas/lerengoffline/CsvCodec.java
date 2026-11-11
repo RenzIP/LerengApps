@@ -27,11 +27,20 @@ public final class CsvCodec {
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (c == '"') {
-                if (quoted && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    value.append('"');
-                    i++;
+                if (quoted) {
+                    if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                        value.append('"');
+                        i++;
+                    } else {
+                        quoted = false;
+                    }
+                } else if (value.length() == 0) {
+                    // Kutip pembuka hanya sah di awal sel. Tanpa aturan ini,
+                    // tanda kutip di tengah label seperti Renz "The Hiker"
+                    // membuat seluruh kolom sesudahnya bergeser.
+                    quoted = true;
                 } else {
-                    quoted = !quoted;
+                    value.append('"');
                 }
             } else if (c == ',' && !quoted) {
                 result.add(value.toString());
