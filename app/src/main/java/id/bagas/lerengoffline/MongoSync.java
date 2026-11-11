@@ -1,6 +1,7 @@
 package id.bagas.lerengoffline;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 
 import org.json.JSONArray;
@@ -24,28 +25,33 @@ import java.util.UUID;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * Pengiriman manual ke endpoint HTTPS milik pengguna.
+ * Sinkron otomatis ke endpoint HTTPS milik pengguna.
  *
  * Aplikasi tidak pernah menyimpan URI MongoDB. Yang disimpan hanya alamat
- * endpoint dan token; server yang memegang kredensial basis data. Pengiriman
- * hanya berjalan saat tombol ditekan, tidak ada antrean background.
+ * endpoint dan token; server yang memegang kredensial basis data. Sinkron
+ * berjalan otomatis saat ada data baru, saat aplikasi dibuka, dan berkala
+ * lewat JobScheduler. Tidak ada tombol kirim.
+ *
+ * Pengiriman bersifat inkremental: tanda air per proyek menyimpan ID lokal
+ * terakhir yang sudah terkirim, sehingga ribuan titik lama tidak dikirim ulang.
+ * Setiap dokumen tetap punya {@code _id} stabil, jadi pengiriman ulang aman.
  */
 final class MongoSync {
     static final String PREFS = "lereng_sync";
+    static final String ACTION_SYNC_STATUS = "id.bagas.lerengoffline.SYNC_STATUS";
+
     private static final String KEY_ENDPOINT = "endpoint";
     private static final String KEY_TOKEN = "token";
     private static final String KEY_CLIENT_ID = "client_id";
+    private static final String KEY_AUTO = "auto";
+    private static final String KEY_STATUS = "last_status";
+    private static final String KEY_STATUS_OK = "last_status_ok";
+    private static final String KEY_STATUS_AT = "last_status_at";
 
     static final String SCHEMA = "lereng.mongo/1";
     static final int CHUNK_SIZE = 300;
     private static final int CONNECT_TIMEOUT_MS = 15000;
     private static final int READ_TIMEOUT_MS = 45000;
-
-    interface Callback {
-        void onProgress(int sent, int total);
-        void onSuccess(int total);
-        void onError(String message);
-    }
 
     static final class Config {
         final URL endpoint;
@@ -86,12 +92,29 @@ final class MongoSync {
         return new Config(endpoint, token);
     }
 
-    /** Menghapus alamat dan token, tetapi mempertahankan ID pemasangan. */
+    /** Menghapus alamat dan token, mematikan sinkron, tetapi mempertahankan ID pemasangan. */
     static void clear(Context context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .remove(KEY_ENDPOINT)
                 .remove(KEY_TOKEN)
+                .putBoolean(KEY_AUTO, false)
                 .apply();
+    }
+
+    /** Default aktif; tanpa endpoint/token, sinkron tidak melakukan apa pun. */
+    static boolean isAutoEnabled(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_AUTO, true);
+    }
+
+    static void setAutoEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_AUTO, enabled)
+                .apply();
+    }
+
+    static boolean isConfigured(Context context) {
+        return load(context) != null;
     }
 
     /** ID pemasangan yang stabil, dibuat sekali dan tidak pernah dikirim ke pihak lain. */
@@ -139,6 +162,28 @@ final class MongoSync {
         }
     }
 
+    // ------------------------------------------------------------ status
+
+    static String lastStatus(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_STATUS, "Menunggu data pertama…");
+    }
+
+    static boolean lastStatusOk(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_STATUS_OK, true);
+    }
+
+    private static void recordStatus(Context context, String message, boolean ok) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_STATUS, message)
+                .putBoolean(KEY_STATUS_OK, ok)
+                .putLong(KEY_STATUS_AT, System.currentTimeMillis())
+                .apply();
+        Intent intent = new Intent(ACTION_SYNC_STATUS).setPackage(context.getPackageName());
+        context.sendBroadcast(intent);
+    }
+
     // ------------------------------------------------------------ dokumen
 
     /**
@@ -148,26 +193,24 @@ final class MongoSync {
     static List<JSONObject> buildDocuments(String clientId, SurveyDatabase.Survey survey,
                                            String project, List<SurveyDatabase.Point> points,
                                            List<SurveyDatabase.Presence> presence,
-                                           String appVersion) {
+                                           String appVersion, boolean includeProject) {
         List<JSONObject> documents = new ArrayList<>();
         String base = clientId + ":" + survey.id;
 
-        JSONObject projectProperties = new JSONObject();
-        try {
-            projectProperties.put("schema", SCHEMA);
-            projectProperties.put("record_id", base + ":project");
-            projectProperties.put("record_type", "project");
-            projectProperties.put("project", project);
-            projectProperties.put("group_code", survey.groupCode);
-            projectProperties.put("participant_id", survey.participantId);
-            projectProperties.put("participant_alias", survey.participantAlias);
-            projectProperties.put("platform", "android");
-            projectProperties.put("app_version", appVersion);
-            documents.add(feature(null, projectProperties));
-        } catch (Exception ignored) {
-            // Properti proyek selalu bisa disusun; kegagalan di sini berarti
-            // tidak ada yang layak dikirim.
-            return documents;
+        if (includeProject) {
+            try {
+                JSONObject properties = new JSONObject();
+                properties.put("schema", SCHEMA);
+                properties.put("record_id", base + ":project");
+                properties.put("record_type", "project");
+                properties.put("project", project);
+                properties.put("group_code", survey.groupCode);
+                properties.put("participant_id", survey.participantId);
+                properties.put("participant_alias", survey.participantAlias);
+                properties.put("platform", "android");
+                properties.put("app_version", appVersion);
+                documents.add(feature(null, properties));
+            } catch (Exception ignored) {}
         }
 
         for (SurveyDatabase.Point point : points) {
@@ -275,44 +318,119 @@ final class MongoSync {
         return out.toString();
     }
 
-    // ------------------------------------------------------------ kirim
+    // ------------------------------------------------------------ sinkron
 
-    static void send(Config config, String clientId, String project, long surveyId,
-                     String appVersion, List<JSONObject> documents, Callback callback) {
-        if (documents.isEmpty()) {
-            callback.onError("Tidak ada data yang bisa dikirim.");
-            return;
+    /**
+     * Sinkron semua proyek. Aman dipanggil dari JobService maupun aplikasi.
+     * Mengembalikan {@code true} bila tidak ada kegagalan (termasuk saat
+     * sinkron dimatikan atau belum dikonfigurasi).
+     */
+    static boolean syncAll(Context context) {
+        if (!isAutoEnabled(context)) return true;
+        Config config = load(context);
+        if (config == null) return true;
+
+        SurveyDatabase database = new SurveyDatabase(context);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        try {
+            String clientId = clientId(context);
+            String target = targetFingerprint(config.endpoint);
+            List<SurveyDatabase.Survey> surveys = database.getSurveys();
+            int total = 0;
+            int projects = 0;
+
+            for (SurveyDatabase.Survey survey : surveys) {
+                long pointMark = prefs.getLong(pointKey(target, survey.id), 0);
+                long presenceMark = prefs.getLong(presenceKey(target, survey.id), 0);
+                long maxPoint = database.maxPointId(survey.id);
+                long maxPresence = database.maxPresenceId(survey.id);
+                // Database dibuat ulang: ID kembali kecil, jadi mulai dari nol.
+                if (maxPoint > 0 && maxPoint < pointMark) pointMark = 0;
+                if (maxPresence > 0 && maxPresence < presenceMark) presenceMark = 0;
+
+                List<SurveyDatabase.Point> points = database.getPointsAfter(survey.id, pointMark);
+                List<SurveyDatabase.Presence> presence = database.getPresenceAfter(survey.id, presenceMark);
+
+                String signature = survey.name + "\u0000" + survey.groupCode + "\u0000"
+                        + survey.participantId + "\u0000" + survey.participantAlias;
+                boolean projectChanged = !signature.equals(prefs.getString(projectKey(target, survey.id), ""));
+                if (!projectChanged && points.isEmpty() && presence.isEmpty()) continue;
+
+                List<JSONObject> documents = buildDocuments(clientId, survey, survey.name,
+                        points, presence, BuildConfig.VERSION_NAME, projectChanged);
+                if (documents.isEmpty()) continue;
+                sendBlocking(config, clientId, survey.name, survey.id, BuildConfig.VERSION_NAME, documents);
+
+                long newPointMark = pointMark;
+                for (SurveyDatabase.Point point : points) newPointMark = Math.max(newPointMark, point.id);
+                long newPresenceMark = presenceMark;
+                for (SurveyDatabase.Presence event : presence)
+                    newPresenceMark = Math.max(newPresenceMark, event.id);
+                prefs.edit()
+                        .putLong(pointKey(target, survey.id), newPointMark)
+                        .putLong(presenceKey(target, survey.id), newPresenceMark)
+                        .putString(projectKey(target, survey.id), signature)
+                        .apply();
+
+                total += documents.size();
+                projects++;
+            }
+
+            recordStatus(context, total == 0
+                    ? "Sinkron otomatis aktif • semua data sudah terkirim"
+                    : "Sinkron otomatis • " + total + " data dari " + projects + " proyek terkirim", true);
+            return true;
+        } catch (Exception e) {
+            recordStatus(context, "Sinkron otomatis gagal: " + safeMessage(e) + ". Akan dicoba lagi.", false);
+            return false;
+        } finally {
+            database.close();
         }
+    }
+
+    private static String targetFingerprint(URL endpoint) {
+        try {
+            return shortHash(endpoint.toString()).substring(0, 16);
+        } catch (Exception e) {
+            return "default";
+        }
+    }
+
+    private static String pointKey(String target, long surveyId) {
+        return "wp_" + target + "_" + surveyId;
+    }
+
+    private static String presenceKey(String target, long surveyId) {
+        return "wr_" + target + "_" + surveyId;
+    }
+
+    private static String projectKey(String target, long surveyId) {
+        return "pj_" + target + "_" + surveyId;
+    }
+
+    static int sendBlocking(Config config, String clientId, String project, long surveyId,
+                            String appVersion, List<JSONObject> documents) throws Exception {
         int total = documents.size();
         int sent = 0;
-        try {
-            for (int start = 0; start < total; start += CHUNK_SIZE) {
-                int end = Math.min(start + CHUNK_SIZE, total);
-                JSONArray chunk = new JSONArray();
-                for (int i = start; i < end; i++) chunk.put(documents.get(i));
+        for (int start = 0; start < total; start += CHUNK_SIZE) {
+            int end = Math.min(start + CHUNK_SIZE, total);
+            JSONArray chunk = new JSONArray();
+            for (int i = start; i < end; i++) chunk.put(documents.get(i));
 
-                JSONObject body = new JSONObject();
-                body.put("schema", SCHEMA);
-                body.put("client_id", clientId);
-                body.put("platform", "android");
-                body.put("app_version", appVersion);
-                body.put("project", project);
-                body.put("survey_id", surveyId);
-                body.put("sent_at", Instant.ofEpochMilli(System.currentTimeMillis()).toString());
-                body.put("features", chunk);
+            JSONObject body = new JSONObject();
+            body.put("schema", SCHEMA);
+            body.put("client_id", clientId);
+            body.put("platform", "android");
+            body.put("app_version", appVersion);
+            body.put("project", project);
+            body.put("survey_id", surveyId);
+            body.put("sent_at", Instant.ofEpochMilli(System.currentTimeMillis()).toString());
+            body.put("features", chunk);
 
-                post(config, body.toString());
-                sent = end;
-                callback.onProgress(sent, total);
-            }
-            callback.onSuccess(total);
-        } catch (IllegalArgumentException e) {
-            callback.onError(e.getMessage());
-        } catch (Exception e) {
-            callback.onError(sent == 0
-                    ? "Gagal mengirim: " + safeMessage(e)
-                    : "Terhenti setelah " + sent + " dari " + total + " data: " + safeMessage(e));
+            post(config, body.toString());
+            sent = end;
         }
+        return sent;
     }
 
     private static void post(Config config, String body) throws IOException {

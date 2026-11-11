@@ -3,7 +3,6 @@ import SwiftUI
 struct DataView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showDeleteAll = false
-    @State private var showSendConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -28,22 +27,7 @@ struct DataView: View {
             } message: {
                 Text("Tindakan ini tidak dapat dibatalkan. Berkas yang sudah diekspor tetap ada di folder aplikasi.")
             }
-            .confirmationDialog("Kirim semua data ke MongoDB?", isPresented: $showSendConfirm,
-                                titleVisibility: .visible) {
-                Button("Kirim sekarang") { model.sendToMongo() }
-                Button("Batal", role: .cancel) {}
-            } message: {
-                Text("\(trackCount) titik track, \(waypointCount) waypoint, \(model.presence.count) event presence BLE, dan metadata proyek akan dikirim ke \(model.syncEndpoint). Jalur pembanding GPX tidak ikut.")
-            }
         }
-    }
-
-    private var trackCount: Int {
-        model.points.filter { !$0.isWaypoint && $0.hasValidCoordinate }.count
-    }
-
-    private var waypointCount: Int {
-        model.points.filter { $0.isWaypoint && $0.hasValidCoordinate }.count
     }
 
     private var projectSection: some View {
@@ -115,12 +99,25 @@ struct DataView: View {
         } header: {
             Text("Ekspor lokal")
         } footer: {
-            Text("Ekspor bersifat lokal. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi. Unggahan hanya terjadi lewat tombol Kirim ke MongoDB di bawah.")
+            Text("Ekspor bersifat lokal. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi. Sinkron ke MongoDB berjalan otomatis di bagian bawah.")
         }
     }
 
     private var syncSection: some View {
         Section {
+            Toggle(isOn: Binding(
+                get: { model.autoSyncEnabled },
+                set: { model.setAutoSync($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sinkron otomatis")
+                        .font(.body)
+                    Text("Semua proyek, tanpa tombol kirim")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             TextField("https://proyek.vercel.app/api/ingest", text: $model.syncEndpoint)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
@@ -138,30 +135,17 @@ struct DataView: View {
                 Label("Simpan pengaturan", systemImage: "key")
             }
 
-            Button {
-                showSendConfirm = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "arrow.up.doc.on.clipboard")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.isSyncing ? "Mengirim…" : "Kirim ke MongoDB")
-                            .font(.body)
-                        Text("Semua titik, waypoint, presence BLE, dan metadata proyek")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
+            if model.isSyncing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Menyinkronkan…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-            }
-            .disabled(model.isSyncing)
-
-            if let status = model.syncStatus {
+            } else if let status = model.syncStatus {
                 Text(status)
                     .font(.footnote)
-                    .foregroundStyle(status.hasPrefix("Terkirim") ? Color.green : Color.secondary)
+                    .foregroundStyle(statusColor(status))
             }
 
             Button(role: .destructive) {
@@ -170,10 +154,16 @@ struct DataView: View {
                 Label("Hapus alamat & token", systemImage: "trash")
             }
         } header: {
-            Text("Kirim ke MongoDB")
+            Text("Sinkron otomatis ke MongoDB")
         } footer: {
-            Text("Hanya berjalan saat tombol ditekan; tidak ada unggahan otomatis atau background. Endpoint HTTPS milikmu yang menyimpan URI MongoDB—aplikasi hanya menyimpan alamat dan token. Token disimpan di Keychain. Jalur pembanding GPX tidak pernah dikirim.")
+            Text("Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek; saat aplikasi aktif; dan berkala di background bila iOS mengizinkan. Endpoint HTTPS milikmu yang menyimpan URI MongoDB—aplikasi hanya menyimpan alamat dan token. Token disimpan di Keychain. Jalur pembanding GPX tidak pernah dikirim. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.")
         }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        if status.lowercased().contains("gagal") { return .red }
+        if status.lowercased().contains("terkirim") { return .green }
+        return .secondary
     }
 
     private var resetSection: some View {

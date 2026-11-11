@@ -225,11 +225,28 @@ final class Database {
     }
 
     func points(surveyId: Int64) -> [TrackPoint] {
-        let statement = prepare("""
+        loadPoints(sql: """
         SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
                source, label, participant_id, participant_alias, group_code, is_waypoint
         FROM points WHERE survey_id = ? ORDER BY time_ms
-        """, [.int(surveyId)])
+        """, arguments: [.int(surveyId)])
+    }
+
+    /// Titik dengan `_id` di atas tanda air; dipakai sinkron otomatis.
+    func points(surveyId: Int64, after id: Int64) -> [TrackPoint] {
+        loadPoints(sql: """
+        SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
+               source, label, participant_id, participant_alias, group_code, is_waypoint
+        FROM points WHERE survey_id = ? AND _id > ? ORDER BY _id
+        """, arguments: [.int(surveyId), .int(max(0, id))])
+    }
+
+    func maxPointId(surveyId: Int64) -> Int64 {
+        maxId(table: "points", surveyId: surveyId)
+    }
+
+    private func loadPoints(sql: String, arguments: [SQLValue]) -> [TrackPoint] {
+        let statement = prepare(sql, arguments)
         defer { sqlite3_finalize(statement) }
         var result: [TrackPoint] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -283,10 +300,26 @@ final class Database {
     }
 
     func presence(surveyId: Int64) -> [Presence] {
-        let statement = prepare("""
+        loadPresence(sql: """
         SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
         FROM presence WHERE survey_id = ? ORDER BY time_ms
-        """, [.int(surveyId)])
+        """, arguments: [.int(surveyId)])
+    }
+
+    /// Event presence dengan `_id` di atas tanda air; dipakai sinkron otomatis.
+    func presence(surveyId: Int64, after id: Int64) -> [Presence] {
+        loadPresence(sql: """
+        SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
+        FROM presence WHERE survey_id = ? AND _id > ? ORDER BY _id
+        """, arguments: [.int(surveyId), .int(max(0, id))])
+    }
+
+    func maxPresenceId(surveyId: Int64) -> Int64 {
+        maxId(table: "presence", surveyId: surveyId)
+    }
+
+    private func loadPresence(sql: String, arguments: [SQLValue]) -> [Presence] {
+        let statement = prepare(sql, arguments)
         defer { sqlite3_finalize(statement) }
         var result: [Presence] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -298,6 +331,14 @@ final class Database {
                                    groupCode: text(statement, 5)))
         }
         return result
+    }
+
+    private func maxId(table: String, surveyId: Int64) -> Int64 {
+        let statement = prepare("SELECT COALESCE(MAX(_id), 0) FROM \(table) WHERE survey_id = ?",
+                                [.int(surveyId)])
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return sqlite3_column_int64(statement, 0)
     }
 
     func deletePresence(surveyId: Int64) {

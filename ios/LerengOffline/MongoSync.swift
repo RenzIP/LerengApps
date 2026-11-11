@@ -2,19 +2,31 @@ import Foundation
 import CryptoKit
 import Security
 
-/// Pengiriman manual ke endpoint HTTPS milik pengguna.
+/// Sinkron otomatis ke endpoint HTTPS milik pengguna.
 ///
 /// Aplikasi tidak pernah menyimpan URI MongoDB. Yang disimpan hanya alamat
 /// endpoint (UserDefaults) dan token (Keychain). Server yang memegang
-/// kredensial basis data. Tidak ada pengiriman otomatis atau background.
+/// kredensial basis data. Sinkron berjalan sendiri saat ada data baru, saat
+/// aplikasi aktif, dan lewat BGAppRefreshTask bila sistem mengizinkan.
+/// Tidak ada tombol kirim.
+///
+/// Pengiriman bersifat inkremental: tanda air per proyek menyimpan ID lokal
+/// terakhir yang sudah terkirim, sehingga titik lama tidak dikirim ulang.
+/// Setiap dokumen punya `record_id` stabil, jadi pengiriman ulang aman.
 enum MongoSync {
     static let endpointKey = "lereng.sync.endpoint"
+    static let autoKey = "lereng.sync.auto"
     private static let clientIdKey = "lereng.sync.clientId"
     static let chunkSize = 300
 
     struct Config {
         let endpoint: URL
         let token: String
+    }
+
+    struct Summary {
+        let sent: Int
+        let projects: Int
     }
 
     enum SyncError: LocalizedError {
@@ -70,28 +82,70 @@ enum MongoSync {
         return url
     }
 
+    /// Default aktif; tanpa endpoint/token, sinkron tidak melakukan apa pun.
+    static func isAutoEnabled() -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: autoKey) == nil { return true }
+        return defaults.bool(forKey: autoKey)
+    }
+
+    static func setAutoEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: autoKey)
+    }
+
+    /// Konfigurasi siap pakai, atau `nil` bila alamat/token belum lengkap.
+    static func currentConfig() -> Config? {
+        let rawEndpoint = UserDefaults.standard.string(forKey: endpointKey) ?? ""
+        let token = SyncTokenStore.load().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty,
+              let endpoint = try? normalizeEndpoint(rawEndpoint) else { return nil }
+        return Config(endpoint: endpoint, token: token)
+    }
+
+    /// Penanda endpoint agar tanda air tidak tercampur bila alamat diganti.
+    private static func targetFingerprint(_ endpoint: URL) -> String {
+        let digest = SHA256.hash(data: Data(endpoint.absoluteString.utf8))
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func pointKey(_ target: String, _ surveyId: Int64) -> String {
+        "lereng.sync.wp.\(target).\(surveyId)"
+    }
+
+    private static func presenceKey(_ target: String, _ surveyId: Int64) -> String {
+        "lereng.sync.wr.\(target).\(surveyId)"
+    }
+
+    private static func projectKey(_ target: String, _ surveyId: Int64) -> String {
+        "lereng.sync.pj.\(target).\(surveyId)"
+    }
+
     // MARK: - Dokumen
 
     /// Satu dokumen per titik track, waypoint, event presence, dan metadata
     /// proyek. Jalur pembanding GPX sengaja tidak pernah masuk ke sini.
     static func documents(clientId: String, surveyId: Int64, context: ExportContext,
-                          platform: String) -> [[String: Any]] {
+                          platform: String, includeProject: Bool = true) -> [[String: Any]] {
         var documents: [[String: Any]] = []
         let base = "\(clientId):\(surveyId)"
 
-        var projectProperties: [String: Any] = [
-            "schema": "lereng.mongo/1",
-            "record_id": "\(base):project",
-            "record_type": "project",
-            "project": context.project,
-            "group_code": context.groupCode,
-            "participant_id": context.participantId,
-            "participant_alias": context.participantAlias,
-            "platform": platform,
-            "app_version": context.appVersion
-        ]
-        if projectProperties["group_code"] as? String == "" { projectProperties.removeValue(forKey: "group_code") }
-        documents.append(feature(geometry: NSNull(), properties: projectProperties))
+        if includeProject {
+            var projectProperties: [String: Any] = [
+                "schema": "lereng.mongo/1",
+                "record_id": "\(base):project",
+                "record_type": "project",
+                "project": context.project,
+                "group_code": context.groupCode,
+                "participant_id": context.participantId,
+                "participant_alias": context.participantAlias,
+                "platform": platform,
+                "app_version": context.appVersion
+            ]
+            if projectProperties["group_code"] as? String == "" {
+                projectProperties.removeValue(forKey: "group_code")
+            }
+            documents.append(feature(geometry: NSNull(), properties: projectProperties))
+        }
 
         for point in context.points where point.hasValidCoordinate {
             var coordinates = [point.lon, point.lat]
@@ -153,6 +207,68 @@ enum MongoSync {
     private static func shortHash(_ value: String) -> String {
         let digest = SHA256.hash(data: Data(value.utf8))
         return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Sinkron
+
+    /// Sinkron semua proyek secara inkremental. Hanya record di atas tanda air
+    /// yang dikirim; metadata proyek dikirim ulang hanya bila berubah.
+    ///
+    /// Dijalankan di main actor karena `Database` memakai satu koneksi SQLite;
+    /// operasi jaringan tetap asinkron sehingga UI tidak tertahan.
+    @MainActor
+    static func syncAll(database: Database, appVersion: String) async throws -> Summary {
+        guard isAutoEnabled(), let config = currentConfig() else {
+            return Summary(sent: 0, projects: 0)
+        }
+        let defaults = UserDefaults.standard
+        let target = targetFingerprint(config.endpoint)
+        let client = clientId()
+        var sent = 0
+        var projects = 0
+
+        for survey in database.surveys() {
+            let pointStorageKey = pointKey(target, survey.id)
+            let presenceStorageKey = presenceKey(target, survey.id)
+            let projectStorageKey = projectKey(target, survey.id)
+            var pointMark = Int64(defaults.integer(forKey: pointStorageKey))
+            var presenceMark = Int64(defaults.integer(forKey: presenceStorageKey))
+            let maxPoint = database.maxPointId(surveyId: survey.id)
+            let maxPresence = database.maxPresenceId(surveyId: survey.id)
+            // Database dibuat ulang: ID kembali kecil, jadi mulai dari nol.
+            if maxPoint > 0 && maxPoint < pointMark { pointMark = 0 }
+            if maxPresence > 0 && maxPresence < presenceMark { presenceMark = 0 }
+
+            let newPoints = database.points(surveyId: survey.id, after: pointMark)
+            let newPresence = database.presence(surveyId: survey.id, after: presenceMark)
+            let signature = [survey.name, survey.groupCode, survey.participantId,
+                             survey.participantAlias].joined(separator: "\u{0}")
+            let projectChanged = signature != defaults.string(forKey: projectStorageKey)
+            if !projectChanged && newPoints.isEmpty && newPresence.isEmpty { continue }
+
+            let context = ExportContext(project: survey.name,
+                                        points: newPoints,
+                                        presence: newPresence,
+                                        groupCode: survey.groupCode,
+                                        participantId: survey.participantId,
+                                        participantAlias: survey.participantAlias,
+                                        appVersion: appVersion)
+            let payload = documents(clientId: client, surveyId: survey.id, context: context,
+                                    platform: "ios", includeProject: projectChanged)
+            guard !payload.isEmpty else { continue }
+
+            _ = try await send(config: config, surveyId: survey.id, project: survey.name,
+                               appVersion: appVersion, documents: payload) { _, _ in }
+
+            let newPointMark = max(pointMark, newPoints.map(\.id).max() ?? pointMark)
+            let newPresenceMark = max(presenceMark, newPresence.map(\.id).max() ?? presenceMark)
+            defaults.set(Int(newPointMark), forKey: pointStorageKey)
+            defaults.set(Int(newPresenceMark), forKey: presenceStorageKey)
+            defaults.set(signature, forKey: projectStorageKey)
+            sent += payload.count
+            projects += 1
+        }
+        return Summary(sent: sent, projects: projects)
     }
 
     // MARK: - Kirim

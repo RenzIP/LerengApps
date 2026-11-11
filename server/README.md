@@ -1,7 +1,7 @@
 # Endpoint MongoDB untuk Lereng Offline
 
 Folder ini berisi satu fungsi serverless yang menerima data dari tombol
-**Kirim ke MongoDB** di aplikasi. Server ini yang memegang `MONGODB_URI`;
+**Sinkron otomatis** di aplikasi. Server ini yang memegang `MONGODB_URI`;
 APK dan IPA hanya menyimpan alamat endpoint dan token.
 
 Data ditulis sebagai satu dokumen per Fitur GeoJSON:
@@ -88,16 +88,18 @@ Balasan sukses:
 
 ## 4. Isi alamat di aplikasi
 
-Buka tab **Data** → kartu **Kirim ke MongoDB**:
+Buka tab **Data** → kartu **Sinkron otomatis**:
 
 1. Isi endpoint, mis. `https://<proyek>.vercel.app/api/ingest`.
    Alamat dasar tanpa path juga diterima; aplikasi menambahkan `/api/ingest`.
 2. Isi token yang sama dengan `INGEST_TOKEN`.
 3. Tekan **Simpan pengaturan**.
-4. Tekan **Kirim ke MongoDB** dan setujui konfirmasi.
 
-Tidak ada unggahan otomatis. Data hanya keluar saat tombol ditekan.
-Jalur pembanding GPX tidak pernah ikut dikirim.
+Setelah itu aplikasi mengirim sendiri data baru dari **semua proyek**: titik track,
+waypoint, event presence BLE, dan metadata proyek. Tidak ada tombol kirim.
+Pengiriman inkremental—hanya record di atas tanda air lokal yang dikirim—dan
+`_id` stabil membuat percobaan ulang aman. Tanpa internet, data menunggu dan
+dikirim saat koneksi kembali. Jalur pembanding GPX tidak pernah ikut dikirim.
 
 ## 5. Periksa data
 

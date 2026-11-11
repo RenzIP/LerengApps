@@ -48,6 +48,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -127,9 +128,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private TextView exportStatusText, exportStatusMeta;
     private EditText syncEndpointInput, syncTokenInput;
     private TextView syncStatusText;
-    private Button syncSendButton;
-    private boolean syncInFlight;
-    private final ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private Switch syncToggle;
+    private boolean suppressSyncToggle;
+    private boolean syncReceiverRegistered;
     private SharedPreferences exportPrefs;
     private SharedPreferences updatePrefs;
     private AlertDialog updateDialog;
@@ -172,6 +173,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         @Override public void onReceive(Context context, Intent intent) { refreshAll(); }
     };
 
+    private final BroadcastReceiver syncReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) { refreshSyncStatus(); }
+    };
+
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         database = new SurveyDatabase(this);
@@ -195,6 +200,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (LocationLoggingService.isLogging && LocationLoggingService.activeSurveyId > 0)
             selectedSurveyId = LocationLoggingService.activeSurveyId;
         reloadSurveys(selectedSurveyId);
+        MongoSyncScheduler.configure(this);
         refreshAll();
         updatePermissionState();
         checkForUpdate(false);
@@ -709,7 +715,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout exportCard = UiKit.card(this);
         exportCard.addView(UiKit.cardHeader(this, R.drawable.ic_export, "Gabungkan & ekspor", null));
         exportCard.addView(UiKit.caption(this,
-                "CSV menggabungkan peserta dan event BLE. GPX mencadangkan jalur + waypoint. GeoJSON = satu LineString + waypoint; JSONL = satu dokumen per titik untuk MongoDB. Ekspor sendiri tidak mengunggah; unggahan hanya lewat tombol Kirim ke MongoDB."),
+                "CSV menggabungkan peserta dan event BLE. GPX mencadangkan jalur + waypoint. GeoJSON = satu LineString + waypoint; JSONL = satu dokumen per titik untuk MongoDB. Ekspor sendiri tidak mengunggah; unggahan ke MongoDB berjalan otomatis di latar belakang saat endpoint dan token sudah diisi."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
@@ -826,7 +832,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
 
         addDisclosure(page, R.drawable.ic_info, "Catatan & batasan",
                 "LOKASI\n"
-                + "Provider jaringan Android dan GNSS diminta bersamaan. Saat internet putus, fix jaringan lama dibuang dan GNSS tetap diminta; perekaman tidak dijeda. Ketersediaan bergantung perangkat dan layanan lokasi Android. Track tidak diunggah otomatis; pengiriman hanya lewat tombol Kirim ke MongoDB.\n\n"
+                + "Provider jaringan Android dan GNSS diminta bersamaan. Saat internet putus, fix jaringan lama dibuang dan GNSS tetap diminta; perekaman tidak dijeda. Ketersediaan bergantung perangkat dan layanan lokasi Android. Track dikirim otomatis ke endpoint HTTPS milikmu saat ada data baru dan saat internet tersedia.\n\n"
                 + "ELEVASI\n"
                 + "Elevasi Location Android adalah meter di atas ellipsoid WGS84, bukan otomatis tinggi permukaan laut. Akurasi horizontal bukan ukuran akurasi elevasi. Profil dan naik/turun bersifat indikatif, bukan survei resmi.\n\n"
                 + "DATASET LOKAL\n"
@@ -836,7 +842,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
-                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan otomatis. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Satu-satunya unggahan adalah tombol Kirim ke MongoDB yang kamu tekan sendiri, ke endpoint HTTPS milikmu. Token disimpan di penyimpanan privat aplikasi, bukan URI MongoDB.\n\n"
+                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan otomatis. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Jika sinkron otomatis aktif dan endpoint serta token sudah diisi, data baru dikirim sendiri ke endpoint HTTPS milikmu yang menulis ke MongoDB. Token disimpan di penyimpanan privat aplikasi, bukan URI MongoDB. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.\n\n"
                 + "BATERAI\n"
                 + "Beberapa produsen membatasi proses background. Jika rekaman terputus saat layar mati, izinkan aktivitas background atau nonaktifkan optimasi baterai untuk Lereng Offline. Izin lokasi “Saat digunakan” juga dapat menghentikan rekaman di background pada sebagian perangkat.",
                 12);
@@ -845,7 +851,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         aboutCard.addView(UiKit.cardHeader(this, R.drawable.ic_info, "Tentang aplikasi", null));
         aboutCard.addView(UiKit.caption(this,
                 "Lereng Offline v" + BuildConfig.VERSION_NAME + " • satu jalur per proyek\n"
-                + "Data tetap di perangkat sampai kamu menekan Kirim ke MongoDB. Pemeriksaan pembaruan hanya mengambil satu file JSON publik; tidak ada data pengguna yang diunggah otomatis."),
+                + "Data tetap di perangkat sampai sinkron otomatis mengirimkannya ke endpoint HTTPS milikmu. Pemeriksaan pembaruan hanya mengambil satu file JSON publik."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 9, 0, 0));
 
@@ -866,10 +872,11 @@ public final class MainActivity extends Activity implements LocationListener, Se
 
     private LinearLayout buildSyncCard() {
         LinearLayout card = UiKit.card(this);
-        card.addView(UiKit.cardHeader(this, R.drawable.ic_database, "Kirim ke MongoDB", "MANUAL"));
+        card.addView(UiKit.cardHeader(this, R.drawable.ic_database, "Sinkron otomatis", "MONGODB"));
         card.addView(UiKit.caption(this,
-                "Satu tombol, tanpa unggahan otomatis. Endpoint HTTPS milikmu yang menyimpan URI MongoDB; "
-                + "aplikasi hanya menyimpan alamat dan token. Jalur pembanding GPX tidak ikut dikirim."),
+                "Semua proyek dikirim otomatis saat ada data baru, saat aplikasi dibuka, dan berkala di background. "
+                + "Endpoint HTTPS milikmu yang menyimpan URI MongoDB; aplikasi hanya menyimpan alamat dan token. "
+                + "Jalur pembanding GPX tidak ikut."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
@@ -891,23 +898,44 @@ public final class MainActivity extends Activity implements LocationListener, Se
         card.addView(syncTokenInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
 
+        syncToggle = new Switch(this);
+        syncToggle.setText("Sinkron otomatis");
+        syncToggle.setTextSize(14.5f);
+        syncToggle.setTextColor(getColor(R.color.text));
+        syncToggle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        syncToggle.setPadding(0, dp(4), 0, dp(4));
+        syncToggle.setChecked(MongoSync.isAutoEnabled(this));
+        syncToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (suppressSyncToggle) return;
+            MongoSync.setAutoEnabled(this, isChecked);
+            if (isChecked) {
+                if (MongoSync.isConfigured(this)) {
+                    MongoSyncScheduler.configure(this);
+                    MongoSyncScheduler.requestSync(this, 0);
+                    setSyncStatus("Sinkron otomatis aktif. Data baru akan dikirim sendiri.", true);
+                } else {
+                    setSyncStatus("Sinkron otomatis aktif. Isi endpoint dan token untuk mulai.", false);
+                }
+            } else {
+                MongoSyncScheduler.cancelAll(this);
+                setSyncStatus("Sinkron otomatis dijeda. Data tetap tersimpan lokal.", false);
+            }
+        });
+        card.addView(syncToggle, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
+
         Button saveButton = UiKit.button(this, "Simpan pengaturan", UiKit.STYLE_SECONDARY, R.drawable.ic_settings);
         saveButton.setOnClickListener(v -> saveSyncSettings());
         card.addView(saveButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46), 0, 12, 0, 0));
-
-        syncSendButton = UiKit.button(this, "Kirim ke MongoDB", UiKit.STYLE_PRIMARY, R.drawable.ic_database);
-        syncSendButton.setOnClickListener(v -> confirmMongoSync());
-        card.addView(syncSendButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(50), 0, 8, 0, 0));
+                dp(46), 0, 10, 0, 0));
 
         syncStatusText = UiKit.text(this, "Belum diatur.", 13.5f, R.color.warning, Typeface.BOLD);
         syncStatusText.setLineSpacing(dp(2), 1f);
         card.addView(syncStatusText, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         card.addView(UiKit.caption(this,
-                "Token disimpan di penyimpanan privat aplikasi. Data hanya keluar saat tombol Kirim ditekan; "
-                + "tidak ada pengiriman background. Tanpa internet, rekaman tetap berjalan dan bisa dikirim nanti."),
+                "Token disimpan di penyimpanan privat aplikasi. Tidak ada tombol kirim: sinkron berjalan sendiri "
+                + "selama sakelar aktif dan endpoint terisi. Matikan sakelar untuk berhenti; data tetap tersimpan lokal."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0));
 
@@ -917,10 +945,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (clearDrawables[0] != null) clearDrawables[0].setTint(getColor(R.color.danger));
         clearButton.setOnClickListener(v -> {
             MongoSync.clear(this);
+            MongoSyncScheduler.cancelAll(this);
             syncEndpointInput.setText("");
             syncTokenInput.setText("");
-            syncStatusText.setTextColor(getColor(R.color.warning));
-            syncStatusText.setText("Alamat dan token dihapus dari perangkat.");
+            suppressSyncToggle = true;
+            syncToggle.setChecked(false);
+            suppressSyncToggle = false;
+            setSyncStatus("Alamat dan token dihapus. Sinkron otomatis dimatikan.", false);
         });
         card.addView(clearButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(46), 0, 6, 0, 0));
@@ -929,7 +960,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (config != null) {
             syncEndpointInput.setText(config.endpoint.toString());
             syncTokenInput.setText(config.token);
-            syncStatusText.setText("Pengaturan tersimpan. Belum ada data dikirim dari sesi ini.");
+            refreshSyncStatus();
+        } else {
+            setSyncStatus("Belum diatur. Isi endpoint dan token.", false);
         }
         return card;
     }
@@ -939,109 +972,36 @@ public final class MainActivity extends Activity implements LocationListener, Se
             MongoSync.Config config = MongoSync.save(this,
                     syncEndpointInput.getText().toString(), syncTokenInput.getText().toString());
             syncEndpointInput.setText(config.endpoint.toString());
-            syncStatusText.setTextColor(getColor(R.color.success));
-            syncStatusText.setText("Pengaturan tersimpan di perangkat ini.");
+            if (MongoSync.isAutoEnabled(this)) {
+                MongoSyncScheduler.configure(this);
+                MongoSyncScheduler.requestSync(this, 0);
+                setSyncStatus("Pengaturan tersimpan. Sinkron otomatis aktif.", true);
+            } else {
+                setSyncStatus("Pengaturan tersimpan. Sinkron otomatis sedang dijeda.", false);
+            }
             hideKeyboard();
         } catch (IllegalArgumentException e) {
             showSyncError(e.getMessage());
         }
     }
 
-    private void confirmMongoSync() {
-        if (syncInFlight) return;
-        MongoSync.Config config;
-        try {
-            config = MongoSync.save(this,
-                    syncEndpointInput.getText().toString(), syncTokenInput.getText().toString());
-        } catch (IllegalArgumentException e) {
-            showSyncError(e.getMessage());
-            return;
-        }
-        syncEndpointInput.setText(config.endpoint.toString());
-        SurveyDatabase.Survey survey = currentSurvey();
-        if (survey == null) {
-            showSyncError("Proyek belum siap. Coba buka ulang tab Data.");
-            return;
-        }
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        List<SurveyDatabase.Presence> presence = database.getPresence(selectedSurveyId);
-        int track = 0, waypoints = 0;
-        for (SurveyDatabase.Point point : points) {
-            if (!validCoordinate(point)) continue;
-            if (point.waypoint) waypoints++; else track++;
-        }
-        String message = track + " titik track, " + waypoints + " waypoint, "
-                + presence.size() + " event presence BLE, dan 1 metadata proyek akan dikirim ke:\n\n"
-                + config.endpoint + "\n\n"
-                + "Data keluar dari perangkat ini dan ditulis ke MongoDB milikmu. "
-                + "Jalur pembanding GPX tidak ikut. Pengiriman bisa diulang; data yang sama tidak menghasilkan duplikat.";
-        new AlertDialog.Builder(this)
-                .setTitle("Kirim semua data ke MongoDB?")
-                .setMessage(message)
-                .setNegativeButton("Batal", null)
-                .setPositiveButton("Kirim sekarang", (dialog, which) ->
-                        startMongoSync(config, survey, points, presence))
-                .show();
+    private void refreshSyncStatus() {
+        if (syncStatusText == null) return;
+        boolean ok = MongoSync.lastStatusOk(this);
+        syncStatusText.setTextColor(getColor(ok ? R.color.success : R.color.danger));
+        syncStatusText.setText(MongoSync.lastStatus(this));
     }
 
-    private void startMongoSync(MongoSync.Config config, SurveyDatabase.Survey survey,
-                                List<SurveyDatabase.Point> points,
-                                List<SurveyDatabase.Presence> presence) {
-        syncInFlight = true;
-        syncSendButton.setEnabled(false);
-        syncStatusText.setTextColor(getColor(R.color.warning));
-        syncStatusText.setText("Menyiapkan data…");
-        final List<SurveyDatabase.Point> pointSnapshot = new ArrayList<>(points);
-        final List<SurveyDatabase.Presence> presenceSnapshot = new ArrayList<>(presence);
-        final String project = survey.name;
-        final long surveyId = survey.id;
-        try {
-            syncExecutor.execute(() -> {
-                String clientId = MongoSync.clientId(this);
-                List<JSONObject> documents = MongoSync.buildDocuments(
-                        clientId, survey, project, pointSnapshot, presenceSnapshot, BuildConfig.VERSION_NAME);
-                MongoSync.send(config, clientId, project, surveyId, BuildConfig.VERSION_NAME,
-                        documents, new MongoSync.Callback() {
-                            @Override public void onProgress(int sent, int total) {
-                                runOnUiThread(() -> {
-                                    if (isFinishing() || isDestroyed()) return;
-                                    syncStatusText.setText("Mengirim " + sent + " dari " + total + " data…");
-                                });
-                            }
-
-                            @Override public void onSuccess(int total) {
-                                runOnUiThread(() -> {
-                                    if (isFinishing() || isDestroyed()) return;
-                                    syncInFlight = false;
-                                    syncSendButton.setEnabled(true);
-                                    syncStatusText.setTextColor(getColor(R.color.success));
-                                    syncStatusText.setText("Terkirim " + total + " data ke MongoDB. "
-                                            + "Tekan lagi setelah merekam titik baru.");
-                                    Toast.makeText(MainActivity.this,
-                                            "Data terkirim ke MongoDB", Toast.LENGTH_SHORT).show();
-                                });
-                            }
-
-                            @Override public void onError(String errorMessage) {
-                                runOnUiThread(() -> {
-                                    if (isFinishing() || isDestroyed()) return;
-                                    syncInFlight = false;
-                                    syncSendButton.setEnabled(true);
-                                    showSyncError(errorMessage);
-                                });
-                            }
-                        });
-            });
-        } catch (RuntimeException e) {
-            syncInFlight = false;
-            syncSendButton.setEnabled(true);
-            showSyncError("Pengiriman tidak bisa dimulai: " + safeMessage(e));
-        }
+    private void setSyncStatus(String message, boolean ok) {
+        if (syncStatusText == null) return;
+        syncStatusText.setTextColor(getColor(ok ? R.color.success : R.color.warning));
+        syncStatusText.setText(message);
     }
 
     private void showSyncError(String message) {
+        if (syncStatusText == null) return;
         syncStatusText.setTextColor(getColor(R.color.danger));
-        syncStatusText.setText(message == null ? "Pengiriman gagal." : message);
+        syncStatusText.setText(message == null ? "Pengaturan sinkron tidak valid." : message);
     }
 
     private void hideKeyboard() {
@@ -1848,6 +1808,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
         refreshReferenceTrack();
         refreshRouteProfile(points, selectedSurveyId);
         refreshTerrain(points, selectedSurveyId);
+        // Data baru memicu sinkron otomatis; ID job tetap membuat permintaan beruntun digabung.
+        MongoSyncScheduler.requestSync(this, 12000);
     }
 
     /** Refreshes GPS / internet / barometer / BLE chips from the current runtime state. */
@@ -3256,6 +3218,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(dataReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(dataReceiver, filter);
         receiverRegistered = true;
+        IntentFilter syncFilter = new IntentFilter(MongoSync.ACTION_SYNC_STATUS);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(syncReceiver, syncFilter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(syncReceiver, syncFilter);
+        syncReceiverRegistered = true;
         if (pressureSensor != null && sensorManager != null) sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_NORMAL);
         registerNetworkMonitor();
         if (hasPreciseLocation()) beginLiveLocation();
@@ -3269,6 +3235,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
 
     @Override protected void onPause() {
         if (receiverRegistered) { unregisterReceiver(dataReceiver); receiverRegistered = false; }
+        if (syncReceiverRegistered) { unregisterReceiver(syncReceiver); syncReceiverRegistered = false; }
         if (sensorManager != null) sensorManager.unregisterListener(this);
         if (locationManager != null && hasPreciseLocation()) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) {}
@@ -3283,7 +3250,6 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (bottomPrimary != null) bottomPrimary.animate().cancel();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         profileExecutor.shutdownNow();
-        syncExecutor.shutdownNow();
         if (database != null) database.close();
         super.onDestroy();
     }

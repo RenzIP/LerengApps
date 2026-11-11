@@ -79,11 +79,16 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
     }
 
     public static final class Presence {
+        public final long id;
         public final long time;
         public final String observerParticipantId;
         public final String participantId;
         public final String groupCode;
         public Presence(long time, String observerParticipantId, String participantId, String groupCode) {
+            this(0, time, observerParticipantId, participantId, groupCode);
+        }
+        public Presence(long id, long time, String observerParticipantId, String participantId, String groupCode) {
+            this.id = id;
             this.time = time;
             this.observerParticipantId = safe(observerParticipantId);
             this.participantId = safe(participantId);
@@ -427,9 +432,19 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
     }
 
     public synchronized List<Point> getPoints(long surveyId) {
+        return queryPoints(surveyId, 0);
+    }
+
+    /** Titik dengan {@code _id} di atas tanda air; dipakai sinkron otomatis. */
+    public synchronized List<Point> getPointsAfter(long surveyId, long afterId) {
+        return queryPoints(surveyId, Math.max(0, afterId));
+    }
+
+    private List<Point> queryPoints(long surveyId, long afterId) {
         List<Point> result = new ArrayList<>();
-        String sql = "SELECT p._id,p.survey_id,p.time_ms,p.lat,p.lon,p.gps_alt,p.h_acc,p.v_acc,p.pressure_hpa,p.baro_rel_alt,p.source,p.label,COALESCE(NULLIF(p.participant_id,''),s.participant_id,'LEGACY'),COALESCE(NULLIF(p.participant_alias,''),s.participant_alias,'Peserta lama'),COALESCE(NULLIF(p.group_code,''),s.group_code,''),p.is_waypoint FROM points p LEFT JOIN surveys s ON s._id=p.survey_id WHERE p.survey_id=? ORDER BY p.time_ms";
-        try (Cursor c = getReadableDatabase().rawQuery(sql, new String[]{String.valueOf(surveyId)})) {
+        String sql = "SELECT p._id,p.survey_id,p.time_ms,p.lat,p.lon,p.gps_alt,p.h_acc,p.v_acc,p.pressure_hpa,p.baro_rel_alt,p.source,p.label,COALESCE(NULLIF(p.participant_id,''),s.participant_id,'LEGACY'),COALESCE(NULLIF(p.participant_alias,''),s.participant_alias,'Peserta lama'),COALESCE(NULLIF(p.group_code,''),s.group_code,''),p.is_waypoint FROM points p LEFT JOIN surveys s ON s._id=p.survey_id WHERE p.survey_id=? AND p._id>? ORDER BY p._id";
+        try (Cursor c = getReadableDatabase().rawQuery(sql,
+                new String[]{String.valueOf(surveyId), String.valueOf(afterId)})) {
             while (c.moveToNext()) {
                 Double alt = c.isNull(5) ? null : c.getDouble(5);
                 Float hacc = c.isNull(6) ? null : c.getFloat(6);
@@ -446,6 +461,15 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
         return result;
     }
 
+    /** ID titik terbesar, untuk mendeteksi database yang dibuat ulang. */
+    public synchronized long maxPointId(long surveyId) {
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT COALESCE(MAX(_id),0) FROM points WHERE survey_id=?",
+                new String[]{String.valueOf(surveyId)})) {
+            return c.moveToFirst() ? c.getLong(0) : 0;
+        }
+    }
+
     public synchronized boolean recordPresence(long surveyId, String groupCode, String observerId, String participantId, long timeMs) {
         if (safe(groupCode).isEmpty() || safe(observerId).isEmpty() || safe(participantId).isEmpty()) return false;
         ContentValues v = new ContentValues();
@@ -459,11 +483,31 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
     }
 
     public synchronized List<Presence> getPresence(long surveyId) {
+        return queryPresence(surveyId, 0);
+    }
+
+    /** Event presence dengan {@code _id} di atas tanda air; dipakai sinkron otomatis. */
+    public synchronized List<Presence> getPresenceAfter(long surveyId, long afterId) {
+        return queryPresence(surveyId, Math.max(0, afterId));
+    }
+
+    private List<Presence> queryPresence(long surveyId, long afterId) {
         List<Presence> result = new ArrayList<>();
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT time_ms,observer_participant_id,seen_participant_id,group_code FROM presence WHERE survey_id=? ORDER BY time_ms", new String[]{String.valueOf(surveyId)})) {
-            while (c.moveToNext()) result.add(new Presence(c.getLong(0), c.getString(1), c.getString(2), c.getString(3)));
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT _id,time_ms,observer_participant_id,seen_participant_id,group_code FROM presence WHERE survey_id=? AND _id>? ORDER BY _id",
+                new String[]{String.valueOf(surveyId), String.valueOf(afterId)})) {
+            while (c.moveToNext()) result.add(new Presence(c.getLong(0), c.getLong(1),
+                    c.getString(2), c.getString(3), c.getString(4)));
         }
         return result;
+    }
+
+    public synchronized long maxPresenceId(long surveyId) {
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT COALESCE(MAX(_id),0) FROM presence WHERE survey_id=?",
+                new String[]{String.valueOf(surveyId)})) {
+            return c.moveToFirst() ? c.getLong(0) : 0;
+        }
     }
 
     public synchronized int countWaypoints(long surveyId) {

@@ -56,8 +56,10 @@ final class AppModel: ObservableObject {
     @Published var exportItem: ExportItem?
     @Published var syncEndpoint = UserDefaults.standard.string(forKey: MongoSync.endpointKey) ?? ""
     @Published var syncToken = SyncTokenStore.load()
+    @Published var autoSyncEnabled = MongoSync.isAutoEnabled()
     @Published var syncStatus: String?
     @Published var isSyncing = false
+    @Published var lastSyncAt: Date?
     @Published var alertMessage: String?
     @Published var update: IosUpdateInfo?
     @Published var updateNote: String?
@@ -66,6 +68,8 @@ final class AppModel: ObservableObject {
     private var bag = Set<AnyCancellable>()
     private var lastPointTime: Int64 = 0
     private var lastAutoCheck: Date?
+    private var scheduledSync: DispatchWorkItem?
+    private var syncTask: Task<Void, Never>?
 
     private let autoCheckInterval: TimeInterval = 6 * 60 * 60
 
@@ -160,6 +164,7 @@ final class AppModel: ObservableObject {
         isRecording = false
         statusText = "Rekaman berhenti"
         refresh()
+        scheduleSync(delay: 1, force: true)
     }
 
     func requestLocationPermission() {
@@ -200,6 +205,7 @@ final class AppModel: ObservableObject {
         _ = database.insertPoint(point)
         refresh()
         statusText = "Merekam • \(points.filter { !$0.isWaypoint }.count) titik"
+        scheduleSync()
     }
 
     func addWaypoint(label: String) {
@@ -242,6 +248,7 @@ final class AppModel: ObservableObject {
                              isWaypoint: true)
         _ = database.insertPoint(point)
         refresh()
+        scheduleSync()
     }
 
     private func recordPeer(_ peer: String) {
@@ -253,6 +260,7 @@ final class AppModel: ObservableObject {
                                     seen: peer,
                                     groupCode: survey.groupCode)
         presence = database.presence(surveyId: survey.id)
+        scheduleSync()
     }
 
     // MARK: - Identitas outing
@@ -284,6 +292,7 @@ final class AppModel: ObservableObject {
         if isRecording, !code.isEmpty, !identifier.isEmpty {
             ble.start(groupCode: code, participantId: identifier)
         }
+        scheduleSync()
         return nil
     }
 
@@ -294,6 +303,7 @@ final class AppModel: ObservableObject {
         database.renameSurvey(survey.id, name: clean)
         survey.name = clean
         self.survey = survey
+        scheduleSync()
     }
 
     // MARK: - Hapus data
@@ -416,7 +426,7 @@ final class AppModel: ObservableObject {
         return trimmed.isEmpty ? "proyek" : String(trimmed.prefix(40))
     }
 
-    // MARK: - Kirim ke MongoDB
+    // MARK: - Sinkron otomatis ke MongoDB
 
     var syncConfigured: Bool {
         !syncEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -434,11 +444,31 @@ final class AppModel: ObservableObject {
             SyncTokenStore.save(token)
             syncEndpoint = url.absoluteString
             syncToken = token
-            syncStatus = "Pengaturan tersimpan di perangkat ini."
+            syncStatus = autoSyncEnabled
+                ? "Pengaturan tersimpan. Sinkron otomatis aktif."
+                : "Pengaturan tersimpan. Sinkron otomatis sedang dijeda."
+            if autoSyncEnabled { scheduleSync(delay: 1, force: true) }
             return true
         } catch {
             syncStatus = error.localizedDescription
             return false
+        }
+    }
+
+    func setAutoSync(_ enabled: Bool) {
+        autoSyncEnabled = enabled
+        MongoSync.setAutoEnabled(enabled)
+        scheduledSync?.cancel()
+        scheduledSync = nil
+        if enabled {
+            if syncConfigured {
+                syncStatus = "Sinkron otomatis aktif. Data baru dikirim sendiri."
+                scheduleSync(delay: 1, force: true)
+            } else {
+                syncStatus = "Sinkron otomatis aktif. Isi endpoint dan token untuk mulai."
+            }
+        } else {
+            syncStatus = "Sinkron otomatis dijeda. Data tetap tersimpan lokal."
         }
     }
 
@@ -447,61 +477,51 @@ final class AppModel: ObservableObject {
         SyncTokenStore.clear()
         syncEndpoint = ""
         syncToken = ""
-        syncStatus = "Alamat dan token dihapus dari perangkat."
+        autoSyncEnabled = false
+        MongoSync.setAutoEnabled(false)
+        scheduledSync?.cancel()
+        scheduledSync = nil
+        syncStatus = "Alamat dan token dihapus. Sinkron otomatis dimatikan."
     }
 
-    /// Hanya berjalan saat pengguna menekan tombol dan menyetujui konfirmasi.
-    func sendToMongo() {
-        guard let survey, !isSyncing else { return }
-        guard saveSyncSettings() else { return }
-        let config: MongoSync.Config
-        do {
-            config = MongoSync.Config(endpoint: try MongoSync.normalizeEndpoint(syncEndpoint),
-                                      token: syncToken)
-        } catch {
-            syncStatus = error.localizedDescription
-            return
+    /// Menunda sinkron sebentar supaya banyak titik beruntun dikirim sekali.
+    /// Permintaan yang sudah antre tidak ditunda lagi oleh titik berikutnya.
+    func scheduleSync(delay: TimeInterval = 20, force: Bool = false) {
+        guard autoSyncEnabled, syncConfigured else { return }
+        if scheduledSync != nil && !force { return }
+        scheduledSync?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.scheduledSync = nil
+            self?.syncNow()
         }
+        scheduledSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
 
-        let context = ExportContext(project: survey.name,
-                                    points: points,
-                                    presence: presence,
-                                    groupCode: survey.groupCode,
-                                    participantId: survey.participantId,
-                                    participantAlias: survey.participantAlias,
-                                    appVersion: AppConfig.version)
-        let documents = MongoSync.documents(clientId: MongoSync.clientId(),
-                                            surveyId: survey.id,
-                                            context: context,
-                                            platform: "ios")
-        guard !documents.isEmpty else {
-            syncStatus = "Tidak ada data yang bisa dikirim."
-            return
-        }
+    func syncNow() {
+        guard autoSyncEnabled, syncConfigured, !isSyncing else { return }
+        syncTask = Task { await self.performSync() }
+    }
 
+    /// Dipakai juga oleh BGAppRefreshTask. Aman dipanggil kapan saja.
+    @MainActor
+    func performSync() async {
+        guard autoSyncEnabled, !isSyncing else { return }
+        guard MongoSync.currentConfig() != nil else { return }
         isSyncing = true
-        syncStatus = "Menyiapkan \(documents.count) data…"
-        Task {
-            do {
-                let total = try await MongoSync.send(config: config,
-                                                     surveyId: survey.id,
-                                                     project: survey.name,
-                                                     appVersion: AppConfig.version,
-                                                     documents: documents) { sent, total in
-                    DispatchQueue.main.async { [weak self] in
-                        self?.syncStatus = "Mengirim \(sent) dari \(total) data…"
-                    }
-                }
-                await MainActor.run {
-                    self.isSyncing = false
-                    self.syncStatus = "Terkirim \(total) data ke MongoDB. Tekan lagi setelah merekam titik baru."
-                }
-            } catch {
-                await MainActor.run {
-                    self.isSyncing = false
-                    self.syncStatus = error.localizedDescription
-                }
-            }
+        syncStatus = "Menyinkronkan data baru…"
+        do {
+            let summary = try await MongoSync.syncAll(database: database,
+                                                      appVersion: AppConfig.version)
+            isSyncing = false
+            lastSyncAt = Date()
+            syncStatus = summary.sent == 0
+                ? "Sinkron otomatis aktif • semua data sudah terkirim"
+                : "Terkirim \(summary.sent) data dari \(summary.projects) proyek"
+        } catch {
+            isSyncing = false
+            syncStatus = "Sinkron otomatis gagal: \(error.localizedDescription). Akan dicoba lagi."
+            scheduleSync(delay: 120, force: true)
         }
     }
 

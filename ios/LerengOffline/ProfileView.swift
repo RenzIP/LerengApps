@@ -97,7 +97,7 @@ struct ProfileView: View {
         } header: {
             Text("Identitas rombongan")
         } footer: {
-            Text("BLE hanya bertukar potongan hash kode outing dan ID peserta sekali-jalan. Tidak ada MAC, RSSI, jarak, atau posisi yang disimpan, dan tidak ada unggahan ke server.")
+            Text("BLE hanya bertukar potongan hash kode outing dan ID peserta sekali-jalan. Tidak ada MAC, RSSI, jarak, atau posisi yang disimpan. Event kehadiran ikut sinkron otomatis ke endpoint HTTPS milikmu bila sinkron otomatis aktif.")
         }
     }
 

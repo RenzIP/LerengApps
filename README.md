@@ -1,6 +1,6 @@
 # Lereng Offline 2.5.4
 
-Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga, unduhan dataset otomatis, atau unggahan track.
+Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga atau unduhan dataset otomatis. Data rekaman dapat dikirim otomatis ke MongoDB milikmu lewat endpoint HTTPS yang kamu siapkan sendiri.
 
 ## Permukaan terrain lokal Android
 
@@ -36,7 +36,7 @@ Profil tetap merupakan perkiraan dari dataset yang kamu sediakan, bukan survei r
 
 ## Perekaman dan rombongan
 
-- Lokasi Android memakai **Fused Location Provider** (Google Play Services) dengan prioritas akurasi tinggi, interval 5 detik, dan fallback otomatis ke `LocationManager` bila Play Services tidak tersedia. iOS memakai Core Location dengan `kCLLocationAccuracyBestForNavigation` dan filter jarak 2 m. Fused menggabungkan GNSS, Wi-Fi, dan sel seperti aplikasi olahraga populer; lokasi melewati layanan Google, tetapi aplikasi ini tetap tidak mengunggah track. Di luar jangkauan jaringan, GNSS tetap menjadi sumber utama.
+- Lokasi Android memakai **Fused Location Provider** (Google Play Services) dengan prioritas akurasi tinggi, interval 5 detik, dan fallback otomatis ke `LocationManager` bila Play Services tidak tersedia. iOS memakai Core Location dengan `kCLLocationAccuracyBestForNavigation` dan filter jarak 2 m. Fused menggabungkan GNSS, Wi-Fi, dan sel seperti aplikasi olahraga populer; lokasi melewati layanan Google. Data hanya dikirim ke endpoint HTTPS milikmu saat sinkron otomatis aktif. Di luar jangkauan jaringan, GNSS tetap menjadi sumber utama.
 - Titik dengan akurasi horizontal di atas **30 m tidak disimpan**; status perekaman menampilkan bahwa titik dilewati. Tujuannya agar jalur tidak melompat saat sinyal buruk. Konsekuensinya, di lembah sempit atau bawah kanopi rapat bisa ada jeda antar titik.
 - Track, waktu, akurasi, elevasi yang tersedia, dan tekanan barometer opsional disimpan lokal. Elevasi Android `Location` memakai ellipsoid WGS84 dan bukan otomatis tinggi permukaan laut.
 - Untuk rombongan, gunakan kode outing sama pada setiap ponsel, rekam tiap peserta, lalu gabungkan CSV secara manual setelah perjalanan.
@@ -70,19 +70,33 @@ Tab **Data** menyediakan empat jalur ekspor:
 
 Aplikasi tidak pernah menyimpan URI MongoDB. Ada dua jalur untuk memasukkannya:
 
-### Tombol Kirim ke MongoDB (manual, butuh internet)
+### Sinkron otomatis ke MongoDB (butuh internet)
 
-Tab **Data** → kartu **Kirim ke MongoDB** meminta alamat endpoint HTTPS dan token.
+Tab **Data** → kartu **Sinkron otomatis** meminta alamat endpoint HTTPS dan token.
 Server kecil di folder [`server/`](server/README.md) yang memegang `MONGODB_URI`;
 APK/IPA hanya menyimpan alamat dan token (Android: penyimpanan privat aplikasi,
-iOS: Keychain). Tombol ini mengirim **semua** data proyek aktif: titik track,
-waypoint, event presence BLE, dan metadata proyek. Jalur pembanding GPX tidak
-pernah ikut. Setiap Fitur punya `_id` stabil, jadi menekan tombol berulang hanya
-memperbarui dokumen yang sama—bukan menggandakan.
+iOS: Keychain). Setelah endpoint dan token diisi, aplikasi mengirim **semua proyek**
+secara otomatis: titik track, waypoint, event presence BLE, dan metadata proyek.
+Tidak ada tombol kirim.
 
-Tidak ada unggahan otomatis atau background. Tanpa internet, rekaman tetap
-berjalan dan data bisa dikirim nanti. Endpoint harus HTTPS; alamat dasar seperti
-`https://proyek.vercel.app` otomatis diarahkan ke `/api/ingest`.
+Pengiriman bersifat inkremental. Tanda air per proyek menyimpan ID lokal terakhir
+yang sudah terkirim, sehingga titik lama tidak dikirim ulang. Setiap Fitur punya
+`_id` stabil, jadi percobaan ulang hanya memperbarui dokumen yang sama—bukan
+menggandakan. Metadata proyek dikirim ulang hanya bila nama atau identitas berubah.
+
+Pemicu sinkron:
+
+- Android: setiap ada data baru (dibatasi maksimal sekali per menit), saat aplikasi
+  dibuka, saat rekaman dihentikan, dan lewat `JobScheduler` berkala 15 menit.
+- iOS: setiap ada data baru (ditunda sebentar agar titik beruntun tergabung), saat
+  aplikasi aktif, saat rekaman dihentikan, dan lewat `BGAppRefreshTask` bila iOS
+  memberi kesempatan. iOS tidak menjamin eksekusi background.
+
+Tanpa internet, rekaman tetap berjalan dan data menunggu untuk dikirim saat
+koneksi kembali. Sakelar sinkron otomatis dapat dijeda kapan saja; data tetap
+tersimpan lokal. Endpoint harus HTTPS; alamat dasar seperti
+`https://proyek.vercel.app` otomatis diarahkan ke `/api/ingest`. Jalur pembanding
+GPX tidak pernah ikut dikirim.
 
 ### Impor manual dari komputer
 
@@ -99,7 +113,7 @@ Skrip membuat index `2dsphere`, memberi `_id` deterministik agar impor ulang tid
 
 Versi 2.5.0 menambahkan pemeriksaan pembaruan lewat satu manifes JSON publik. Aplikasi hanya
 melakukan `GET` HTTPS ke manifes itu (±7 detik timeout, maksimal 64 KB) dan membandingkan
-`versionCode`. Tidak ada data pengguna yang dikirim dan tidak ada unggahan.
+`versionCode`. Pemeriksaan pembaruan tidak mengirim data pengguna; unggahan hanya dilakukan oleh sinkron otomatis ke endpoint milikmu.
 
 - Jika versi di manifes lebih baru, muncul dialog pembaruan.
 - Jika `mandatory: true` atau build terpasang di bawah `minSupportedVersionCode`, dialog tidak

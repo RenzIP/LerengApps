@@ -24,8 +24,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: id.bagas.lerengoffline.ios
         PRODUCT_NAME: LerengOffline
-        MARKETING_VERSION: "1.3.0"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "1.4.0"
+        CURRENT_PROJECT_VERSION: "5"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -40,11 +40,14 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
-        NSLocationWhenInUseUsageDescription: "Lereng Offline merekam jalur pendakian di perangkat ini. Tidak ada unggahan otomatis."
-        NSLocationAlwaysAndWhenInUseUsageDescription: "Rekaman jalur perlu berlanjut saat layar mati. Data tetap di perangkat."
+        NSLocationWhenInUseUsageDescription: "Lereng Offline merekam jalur pendakian di perangkat ini. Data baru dikirim otomatis ke endpoint HTTPS milikmu bila sinkron otomatis aktif."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Rekaman jalur perlu berlanjut saat layar mati. Data tersimpan lokal dan dikirim otomatis ke endpoint milikmu."
         NSBluetoothAlwaysUsageDescription: "BLE hanya bertukar ID samaran dan waktu untuk mencatat siapa yang terlihat di rombongan. Tidak ada jarak, posisi, atau MAC."
+        BGTaskSchedulerPermittedIdentifiers:
+          - id.bagas.lerengoffline.sync
         UIBackgroundModes:
           - location
+          - fetch
           - bluetooth-central
           - bluetooth-peripheral
 

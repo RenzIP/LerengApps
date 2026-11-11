@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import CoreLocation
 
-/// Perekam lokasi. Hanya menulis ke perangkat; tidak ada unggahan.
+/// Perekam lokasi. Menulis ke perangkat; pengiriman dilakukan terpisah oleh sinkron otomatis.
 final class LocationRecorder: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var wantsUpdates = false

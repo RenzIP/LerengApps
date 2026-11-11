@@ -76,6 +76,7 @@ public final class LocationLoggingService extends Service implements LocationLis
     private long lastSavedLocationTime = 0;
     private boolean registered;
     private boolean saveScheduled;
+    private long lastSyncRequestAt = 0;
     private FusedLocationProviderClient fusedClient;
     private boolean fusedActive;
     private final Handler locationHandler = new Handler(Looper.getMainLooper());
@@ -128,6 +129,7 @@ public final class LocationLoggingService extends Service implements LocationLis
                         @Override public void onStatus(String status) { updateNotification(status); }
                         @Override public void onPeerSeen(String id) {
                             sendBroadcast(new Intent(ACTION_UPDATED).setPackage(getPackageName()));
+                            scheduleSync(20000);
                             updateNotification("Lokasi aktif • ID peserta terlihat; BLE tidak mengukur jarak atau elevasi.");
                         }
                     });
@@ -299,6 +301,7 @@ public final class LocationLoggingService extends Service implements LocationLis
             lastSavedAt = now;
             lastSavedLocationTime = location.getTime();
             sendBroadcast(new Intent(ACTION_UPDATED).setPackage(getPackageName()));
+            scheduleSync(20000);
             updateNotification(String.format(Locale.getDefault(), "Titik %s • akurasi horizontal %s",
                     source, location.hasAccuracy() ? "±" + Math.round(location.getAccuracy()) + " m" : "tidak diketahui"));
         } catch (RuntimeException ignored) {
@@ -335,9 +338,22 @@ public final class LocationLoggingService extends Service implements LocationLis
         return 44330.0 * (1.0 - Math.pow(pressureHpa / baselinePressureHpa, 0.190294957));
     }
 
+    /**
+     * Minta sinkron otomatis, tetapi tidak lebih sering dari sekali per menit.
+     * Tanpa batas ini, setiap titik akan menumpuk permintaan jaringan.
+     */
+    private void scheduleSync(long delayMs) {
+        long now = System.currentTimeMillis();
+        if (now - lastSyncRequestAt < 60000L) return;
+        lastSyncRequestAt = now;
+        MongoSyncScheduler.requestSync(this, delayMs);
+    }
+
     private void stopLogging() {
         locationHandler.removeCallbacksAndMessages(null);
         saveScheduled = false;
+        // Kirim sisa data segera; rekaman berhenti tetapi data tetap tersimpan lokal.
+        MongoSyncScheduler.requestSync(this, 0);
         if (bleController != null) {
             bleController.stop();
             bleController = null;

@@ -54,9 +54,9 @@ public class MongoSyncTest {
         presence.add(new SurveyDatabase.Presence(1760000005000L, "P001", "P002", "ROMBONGAN1"));
 
         List<JSONObject> first = MongoSync.buildDocuments(
-                "client-a", survey(), "Gunung Uji", points, presence, "2.5.4");
+                "client-a", survey(), "Gunung Uji", points, presence, "2.5.5", true);
         List<JSONObject> second = MongoSync.buildDocuments(
-                "client-a", survey(), "Gunung Uji", points, presence, "2.5.4");
+                "client-a", survey(), "Gunung Uji", points, presence, "2.5.5", true);
 
         assertEquals(4, first.size());
         assertEquals(4, second.size());
@@ -85,9 +85,28 @@ public class MongoSyncTest {
         points.add(point(1, false));
         points.add(point(1, true));
         List<JSONObject> documents = MongoSync.buildDocuments(
-                "client-a", survey(), "Gunung Uji", points, new ArrayList<>(), "2.5.4");
+                "client-a", survey(), "Gunung Uji", points, new ArrayList<>(), "2.5.5", true);
         assertNotEquals(
                 documents.get(1).getJSONObject("properties").getString("record_id"),
                 documents.get(2).getJSONObject("properties").getString("record_id"));
+    }
+
+    @Test public void tanpaPerubahanProyekMetadataTidakDikirim() throws Exception {
+        List<SurveyDatabase.Point> points = new ArrayList<>();
+        points.add(point(9, false));
+        List<JSONObject> documents = MongoSync.buildDocuments(
+                "client-a", survey(), "Gunung Uji", points, new ArrayList<>(), "2.5.5", false);
+        assertEquals(1, documents.size());
+        assertEquals("track", documents.get(0).getJSONObject("properties").getString("record_type"));
+    }
+
+    @Test public void presenceMemakaiHashStabil() throws Exception {
+        List<SurveyDatabase.Presence> presence = new ArrayList<>();
+        presence.add(new SurveyDatabase.Presence(42, 1760000005000L, "P001", "P002", "ROMBONGAN1"));
+        List<JSONObject> documents = MongoSync.buildDocuments(
+                "client-a", survey(), "Gunung Uji", new ArrayList<>(), presence, "2.5.5", false);
+        String recordId = documents.get(0).getJSONObject("properties").getString("record_id");
+        assertTrue(recordId.startsWith("client-a:7:presence:"));
+        assertNotEquals("client-a:7:presence:42", recordId);
     }
 }

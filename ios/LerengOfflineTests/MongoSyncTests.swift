@@ -75,4 +75,26 @@ final class MongoSyncTests: XCTestCase {
         XCTAssertEqual(geometry?["type"] as? String, "Point")
         XCTAssertEqual((geometry?["coordinates"] as? [Double])?.count, 3)
     }
+
+    func testTanpaPerubahanProyekMetadataTidakDikirim() {
+        let documents = MongoSync.documents(clientId: "client-a", surveyId: 7,
+                                            context: context(), platform: "ios",
+                                            includeProject: false)
+        XCTAssertEqual(documents.count, 3)
+        let types = documents.compactMap {
+            ($0["properties"] as? [String: Any])?["record_type"] as? String
+        }
+        XCTAssertEqual(types, ["track", "waypoint", "presence"])
+    }
+
+    func testPresenceMemakaiHashStabil() {
+        let documents = MongoSync.documents(clientId: "client-a", surveyId: 7,
+                                            context: context(), platform: "ios",
+                                            includeProject: false)
+        let presence = documents.last
+        let recordId = (presence?["properties"] as? [String: Any])?["record_id"] as? String
+        XCTAssertNotNil(recordId)
+        XCTAssertTrue(recordId?.hasPrefix("client-a:7:presence:") == true)
+        XCTAssertNotEqual(recordId, "client-a:7:presence:1")
+    }
 }
