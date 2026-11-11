@@ -1,17 +1,17 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 12,
-  "versionName": "2.5.3",
-  "mandatory": true,
+  "versionCode": 13,
+  "versionName": "2.5.4",
+  "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.3/LerengOffline-2.5.3.apk",
-  "sizeBytes": 2691769,
-  "sha256": "4a9b8320aa3331266f1658e124e70ea515b3ad963f57eee476a286bd4c8a746b",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.4/LerengOffline-2.5.4.apk",
+  "sizeBytes": 2701845,
+  "sha256": "79355e87d18b9a04e2ddd2df24a7737025b698ef4bd24cb5bb147d7c4455c45f",
   "notes": [
-    "Android memakai Fused Location Provider (Google Play Services) dengan fallback GNSS",
-    "Titik dengan akurasi horizontal di atas 30 m tidak disimpan",
-    "Jalur pembanding GPX dari ekspor Strava dapat diimpor dan digambar putus-putus",
-    "Jalur pembanding disimpan terpisah dan tidak ikut diekspor"
+    "Tombol Kirim ke MongoDB: semua data proyek dikirim manual ke endpoint HTTPS milikmu",
+    "Tidak ada unggahan otomatis; jalur pembanding GPX tidak ikut",
+    "Endpoint dan token disimpan di perangkat; server memegang URI MongoDB",
+    "Kirim ulang tidak menggandakan data karena setiap Fitur punya ID stabil"
   ],
-  "publishedAt": "2026-11-11T02:52:01Z"
+  "publishedAt": "2026-11-11T03:27:58Z"
 }

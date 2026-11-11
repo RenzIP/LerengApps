@@ -92,7 +92,8 @@ jobs:
           ## Data
 
           Aplikasi tetap offline: rekaman disimpan di SQLite perangkat, ekspor lewat lembar
-          berbagi iOS. Satu-satunya permintaan jaringan adalah manifes pembaruan JSON.
+          berbagi iOS. Permintaan jaringan hanya manifes pembaruan JSON dan tombol
+          Kirim ke MongoDB yang kamu tekan sendiri.
 
           SHA-256: \`${SHA}\`
           EOF
