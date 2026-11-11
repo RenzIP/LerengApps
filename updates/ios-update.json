@@ -1,15 +1,15 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 5,
-  "version": "1.4.0",
+  "build": 6,
+  "version": "1.4.1",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.0",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.1",
   "notes": [
-    "Sinkron otomatis ke MongoDB untuk semua proyek, tanpa tombol kirim",
-    "Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek",
-    "Sinkron saat aplikasi aktif dan lewat BGAppRefreshTask bila iOS mengizinkan",
-    "Pengiriman inkremental dan idempoten; jalur pembanding GPX tidak ikut"
+    "Sinkron otomatis langsung aktif: endpoint dan kunci aplikasi sudah tertanam, tidak ada isian apa pun",
+    "Bagian sinkron tidak lagi meminta alamat atau kunci; pengaturan lanjutan tetap tersedia bila perlu",
+    "Kunci aplikasi bukan rahasia; server membatasi laju permintaan per IP",
+    "Rekaman offline tetap berjalan dan data dikirim sendiri saat koneksi kembali"
   ],
-  "publishedAt": "2026-11-11T04:25:00Z"
+  "publishedAt": "2026-11-11T09:20:00Z"
 }
