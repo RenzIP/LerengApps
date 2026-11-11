@@ -1,14 +1,15 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 2,
-  "version": "1.1.0",
+  "build": 3,
+  "version": "1.2.0",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.1.0",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.2.0",
   "notes": [
-    "iPhone dapat mendeteksi kehadiran teman yang memakai Android (manufacturer data 0xFFFF)",
-    "Ikon aplikasi Lereng Offline",
+    "Akurasi lokasi ditingkatkan (best-for-navigation) dan titik di atas 30 m tidak disimpan",
+    "Impor GPX pembanding dari ekspor Strava/app lain, digambar putus-putus",
+    "Jalur pembanding disimpan terpisah dan tidak ikut diekspor",
     "IPA tanpa tanda tangan untuk dipasang dengan Sideloadly/AltStore"
   ],
-  "publishedAt": "2026-11-11T00:00:00Z"
+  "publishedAt": "2026-11-11T02:58:48Z"
 }
