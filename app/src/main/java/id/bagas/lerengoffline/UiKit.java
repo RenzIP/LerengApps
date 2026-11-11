@@ -168,10 +168,14 @@ final class UiKit {
         row.addView(icon, new LinearLayout.LayoutParams(dp(context, 19), dp(context, 19)));
         TextView label = text(context, title, 15.5f, R.color.text, Typeface.BOLD);
         label.setPadding(dp(context, 9), 0, dp(context, 8), 0);
+        // Judul panjang atau font besar tidak boleh mendorong badge keluar layar.
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         if (trailing != null && trailing.length() > 0) {
             TextView badge = text(context, trailing, 11, R.color.text_faint, Typeface.BOLD);
             badge.setGravity(Gravity.END);
+            badge.setSingleLine(true);
             row.addView(badge);
         }
         return row;
@@ -296,6 +300,8 @@ final class UiKit {
         final LinearLayout root;
         final ImageView icon;
         final TextView label;
+        /** Cache per tone: status chip diperbarui tiap titik, jangan buat drawable baru terus. */
+        private final android.graphics.drawable.Drawable[] backgrounds = new android.graphics.drawable.Drawable[TONE_PRIMARY + 1];
 
         Chip(Context context) {
             this.context = context;
@@ -333,7 +339,13 @@ final class UiKit {
                 default:
                     bgRes = R.color.neutral_container; fgRes = R.color.text_muted; break;
             }
-            root.setBackground(fill(context, bgRes, 15));
+            if (tone < 0 || tone >= backgrounds.length) tone = TONE_NEUTRAL;
+            android.graphics.drawable.Drawable background = backgrounds[tone];
+            if (background == null) {
+                background = fill(context, bgRes, 15);
+                backgrounds[tone] = background;
+            }
+            root.setBackground(background);
             label.setTextColor(color(context, fgRes));
             icon.setColorFilter(color(context, fgRes));
         }
@@ -352,10 +364,13 @@ final class UiKit {
             value = text(context, "—", 20, R.color.text, Typeface.BOLD);
             value.setFontFeatureSettings("tnum");
             value.setSingleLine(true);
+            value.setEllipsize(android.text.TextUtils.TruncateAt.END);
             label = text(context, labelText, 10.5f, R.color.text_faint, Typeface.BOLD);
             label.setAllCaps(true);
             label.setLetterSpacing(0.06f);
             label.setPadding(0, dp(context, 3), 0, 0);
+            label.setSingleLine(true);
+            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
             root.addView(value);
             root.addView(label);
         }

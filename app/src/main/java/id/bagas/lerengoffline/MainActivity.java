@@ -33,6 +33,8 @@ import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -167,6 +169,12 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private boolean pendingStartAfterBle;
     /** True between the start command and the service flipping {@link LocationLoggingService#isLogging}. */
     private boolean startingRecording;
+    /**
+     * Waktu pesan peringatan perekaman terakhir. Tanpa ini, teks peringatan
+     * "GPS tidak memberi titik" langsung ditimpa teks status pada snapshot
+     * berikutnya (tiap ~5 detik) sehingga pengguna tidak sempat membacanya.
+     */
+    private long recordNoticeAt;
     private final ExecutorService profileExecutor = Executors.newSingleThreadExecutor();
     private long cachedElevationDatasetId = -1;
     private SurveyDatabase.ElevationDataset cachedElevationDataset;
@@ -180,11 +188,65 @@ public final class MainActivity extends Activity implements LocationListener, Se
             new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong profileRequest =
             new java.util.concurrent.atomic.AtomicLong();
+    /** Proyek pemilik hasil terrain/profil terakhir; dipakai agar teks tidak berkedip. */
+    private long terrainSurveyId = -1;
+    private long profileSurveyId = -1;
+
+    /**
+     * Pembacaan data untuk layar dilakukan di latar belakang. Sebelumnya
+     * seluruh query (track, presence, dataset, jalur pembanding) berjalan di
+     * UI thread setiap titik baru, sehingga merekam membuat aplikasi tersendat
+     * dan perangkat panas.
+     */
+    private final ExecutorService refreshExecutor = Executors.newSingleThreadExecutor();
+    /** Ekspor/impor file berjalan di sini agar layar tidak membeku pada proyek besar. */
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private final Handler refreshHandler = new Handler(Looper.getMainLooper());
+    private final java.util.concurrent.atomic.AtomicLong refreshGeneration =
+            new java.util.concurrent.atomic.AtomicLong();
+    /** Jeda singkat untuk menggabungkan beberapa permintaan beruntun menjadi satu. */
+    private static final long REFRESH_DEBOUNCE_MS = 120L;
+    private final Runnable refreshTask = this::startSnapshotRead;
+    /** Hasil pembacaan latar belakang yang siap dipasang ke layar. */
+    private static final class UiSnapshot {
+        final long surveyId;
+        final SurveyDatabase.Survey survey;
+        final List<SurveyDatabase.Point> points;
+        final List<SurveyDatabase.Presence> presence;
+        final int participants;
+        final int waypointCount;
+        final int withElevation;
+        final long datasetId;
+        final SurveyDatabase.ElevationDataset dataset;
+        final boolean hasDatasets;
+        final SurveyDatabase.ReferenceTrack reference;
+        final List<double[]> referenceCoordinates;
+
+        UiSnapshot(long surveyId, SurveyDatabase.Survey survey, List<SurveyDatabase.Point> points,
+                   List<SurveyDatabase.Presence> presence, int participants, int waypointCount,
+                   int withElevation, long datasetId, SurveyDatabase.ElevationDataset dataset,
+                   boolean hasDatasets, SurveyDatabase.ReferenceTrack reference,
+                   List<double[]> referenceCoordinates) {
+            this.surveyId = surveyId;
+            this.survey = survey;
+            this.points = points;
+            this.presence = presence;
+            this.participants = participants;
+            this.waypointCount = waypointCount;
+            this.withElevation = withElevation;
+            this.datasetId = datasetId;
+            this.dataset = dataset;
+            this.hasDatasets = hasDatasets;
+            this.reference = reference;
+            this.referenceCoordinates = referenceCoordinates;
+        }
+    }
 
     private final BroadcastReceiver dataReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (LocationLoggingService.ACTION_FAILED.equals(intent.getAction())) {
                 startingRecording = false;
+                recordNoticeAt = System.currentTimeMillis();
                 syncRecordingControls();
                 if (recordText != null) recordText.setText(
                         "Perekaman tidak dapat dimulai: tidak ada sumber lokasi. Periksa izin lokasi presisi dan pastikan GPS aktif.");
@@ -195,6 +257,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 return;
             }
             if (LocationLoggingService.ACTION_NO_FIX.equals(intent.getAction())) {
+                recordNoticeAt = System.currentTimeMillis();
                 if (recordText != null) recordText.setText(
                         "Belum ada titik baru lebih dari 2 menit. GPS mungkin belum mendapat fix: coba area terbuka, atau periksa apakah GPS aktif dan izin lokasi masih diberikan.");
                 updateStatusChips();
@@ -290,10 +353,15 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(12), 0, dp(8), 0);
-        titles.addView(UiKit.text(this, "Lereng Offline", 21, R.color.hero_text, Typeface.BOLD));
+        TextView heroTitle = UiKit.text(this, "Lereng Offline", 21, R.color.hero_text, Typeface.BOLD);
+        heroTitle.setSingleLine(true);
+        heroTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        titles.addView(heroTitle);
         TextView tagline = UiKit.text(this, "Survei jalur & elevasi — data di perangkat",
                 11.5f, R.color.hero_muted, Typeface.NORMAL);
         tagline.setPadding(0, dp(2), 0, 0);
+        tagline.setMaxLines(2);
+        tagline.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titles.addView(tagline);
         brand.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -329,6 +397,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         projectNameText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         projectMetaText = UiKit.text(this, "", 11, R.color.hero_muted, Typeface.NORMAL);
         projectMetaText.setSingleLine(true);
+        projectMetaText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         projectMetaText.setPadding(0, dp(2), 0, 0);
         projectCol.addView(projectNameText);
         projectCol.addView(projectMetaText);
@@ -793,7 +862,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 dp(1), 0, 14, 0, 0));
         exportStatusText = UiKit.text(this, "Belum pernah diekspor", 13.5f, R.color.warning, Typeface.BOLD);
         exportStatusText.setLineSpacing(dp(2), 1f);
-        exportStatusMeta = UiKit.caption(this, "Penyimpanan hanya di perangkat ini.");
+        exportStatusMeta = UiKit.caption(this, "Data lokal, dengan salinan otomatis ke MongoDB saat online.");
         exportStatusMeta.setLineSpacing(dp(2), 1f);
         exportCard.addView(exportStatusText, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
@@ -874,7 +943,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
-                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan otomatis. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Sinkron otomatis sudah terpasang di aplikasi: data baru dikirim sendiri ke endpoint HTTPS yang menulis ke MongoDB milikmu. Kunci aplikasi tertanam di APK, bukan URI MongoDB, dan bukan rahasia—pengamanan ada di server. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.\n\n"
+                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan lokal otomatis; salinan MongoDB dikirim otomatis oleh aplikasi. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Sinkron otomatis sudah terpasang di aplikasi: data baru dikirim sendiri ke endpoint HTTPS yang menulis ke MongoDB milikmu. Kunci aplikasi tertanam di APK, bukan URI MongoDB, dan bukan rahasia—pengamanan ada di server. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.\n\n"
                 + "BATERAI\n"
                 + "Beberapa produsen membatasi proses background. Jika rekaman terputus saat layar mati, izinkan aktivitas background atau nonaktifkan optimasi baterai untuk Lereng Offline. Izin lokasi “Saat digunakan” juga dapat menghentikan rekaman di background pada sebagian perangkat.",
                 12);
@@ -1200,6 +1269,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private void updateProjectHeader() {
         if (projectNameText == null || projectMetaText == null) return;
         SurveyDatabase.Survey survey = currentSurvey();
+        applyProjectHeader(survey, survey == null ? 0 : database.countPoints(survey.id),
+                survey == null ? 0 : database.countWaypoints(survey.id),
+                survey == null ? 0 : database.countParticipants(survey.id));
+    }
+
+    private void applyProjectHeader(SurveyDatabase.Survey survey, int points, int waypoints, int people) {
+        if (projectNameText == null || projectMetaText == null) return;
         if (survey == null) {
             projectNameText.setText("Pilih proyek");
             projectMetaText.setText("Belum ada proyek");
@@ -1209,15 +1285,12 @@ public final class MainActivity extends Activity implements LocationListener, Se
             return;
         }
         projectNameText.setText(survey.name);
-        int points = database.countPoints(survey.id);
-        int people = database.countParticipants(survey.id);
         String meta = points + " titik • " + people + " peserta • "
                 + (survey.groupCode.isEmpty() ? "BLE nonaktif" : survey.groupCode);
         projectMetaText.setText(meta);
         if (projectDataName != null) projectDataName.setText(survey.name);
         if (projectDataMeta != null)
-            projectDataMeta.setText(points + " titik • " + database.countWaypoints(survey.id)
-                    + " waypoint • " + people + " peserta");
+            projectDataMeta.setText(points + " titik • " + waypoints + " waypoint • " + people + " peserta");
         if (projectRow != null)
             projectRow.setContentDescription("Proyek " + survey.name + ". Ketuk untuk mengganti proyek outing.");
     }
@@ -1636,6 +1709,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         SurveyDatabase.Survey s = ensureLocalIdentity();
         if (s == null) return;
         startingRecording = true;
+        recordNoticeAt = 0;
         Intent intent = new Intent(this, LocationLoggingService.class);
         intent.setAction(LocationLoggingService.ACTION_START);
         intent.putExtra(LocationLoggingService.EXTRA_SURVEY_ID, selectedSurveyId);
@@ -1643,8 +1717,15 @@ public final class MainActivity extends Activity implements LocationListener, Se
         intent.putExtra(LocationLoggingService.EXTRA_PARTICIPANT_ID, s.participantId);
         intent.putExtra(LocationLoggingService.EXTRA_PARTICIPANT_ALIAS, s.participantAlias);
         intent.putExtra(LocationLoggingService.EXTRA_BLE_ENABLED, bleEnabled);
-        startForegroundService(intent);
-        recordText.setText(bleEnabled ? "Provider Android network/GNSS aktif; BLE mencatat presence ID secara lokal." : "Provider Android network/GNSS aktif; BLE tidak aktif pada sesi ini.");
+        try {
+            startForegroundService(intent);
+        } catch (RuntimeException e) {
+            startingRecording = false;
+            syncRecordingControls();
+            Toast.makeText(this, "Perekaman gagal dimulai: layanan lokasi ditolak sistem.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        recordText.setText("Memulai perekaman… menunggu layanan lokasi aktif.");
         syncRecordingControls();
         // Safety net: if the service never reports back, re-enable the action instead of locking the UI.
         if (bottomPrimary != null)
@@ -1664,7 +1745,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         }
         Intent intent = new Intent(this, LocationLoggingService.class);
         intent.setAction(LocationLoggingService.ACTION_STOP);
-        startService(intent);
+        recordNoticeAt = 0;
+        try {
+            startService(intent);
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "Perintah berhenti gagal dikirim. Coba lagi.", Toast.LENGTH_LONG).show();
+            return;
+        }
         recordText.setText("Perekaman dihentikan. Data yang sudah tersimpan tetap ada di proyek ini.");
         syncRecordingControls();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1675,25 +1762,28 @@ public final class MainActivity extends Activity implements LocationListener, Se
 
     /** Reflects logging state on the in-card buttons and the sticky bottom bar. */
     private void syncRecordingControls() {
-        boolean logging = LocationLoggingService.isLogging || startingRecording;
-        if (startButton != null) startButton.setEnabled(!logging);
-        if (stopButton != null) stopButton.setEnabled(logging);
-        if (groupButton != null) groupButton.setEnabled(!logging);
+        boolean live = LocationLoggingService.isLogging;
+        boolean busy = live || startingRecording;
+        if (startButton != null) startButton.setEnabled(!busy);
+        if (stopButton != null) stopButton.setEnabled(live);
+        if (groupButton != null) groupButton.setEnabled(!busy);
 
         if (bottomPrimary != null) {
-            bottomPrimary.setText(logging ? "Hentikan" : "Mulai");
+            // Saat layanan belum melapor, tombol tidak boleh mengaku "Hentikan"
+            // karena menekannya belum bisa menghentikan apa pun.
+            bottomPrimary.setText(live ? "Hentikan" : (startingRecording ? "Memulai…" : "Mulai"));
             bottomPrimary.setCompoundDrawablesRelativeWithIntrinsicBounds(
-                    logging ? R.drawable.ic_stop : R.drawable.ic_record, 0, 0, 0);
-            UiKit.styleButton(this, bottomPrimary, logging ? UiKit.STYLE_DANGER : UiKit.STYLE_PRIMARY);
+                    live ? R.drawable.ic_stop : R.drawable.ic_record, 0, 0, 0);
+            UiKit.styleButton(this, bottomPrimary, live ? UiKit.STYLE_DANGER : UiKit.STYLE_PRIMARY);
+            bottomPrimary.setEnabled(!startingRecording);
         }
         if (bottomStatus != null) {
-            boolean live = LocationLoggingService.isLogging;
             bottomStatus.setText(live ? "Merekam" : (startingRecording ? "Memulai…" : "Siap merekam"));
         }
         if (recordDot != null)
-            recordDot.setBackground(UiKit.circle(this, logging ? R.color.danger : R.color.text_faint));
+            recordDot.setBackground(UiKit.circle(this, live ? R.color.danger : R.color.text_faint));
 
-        if (logging) startPulse(); else stopPulse();
+        if (live) startPulse(); else stopPulse();
     }
 
     private void startPulse() {
@@ -1840,16 +1930,84 @@ public final class MainActivity extends Activity implements LocationListener, Se
         Toast.makeText(this, added ? (waypoint ? "Waypoint tersimpan lokal." : "Titik lokasi tersimpan lokal.") : "Titik yang sama sudah ada.", Toast.LENGTH_SHORT).show();
     }
 
+    /**
+     * Meminta penyegaran layar. Pembacaan database dilakukan di executor,
+     * hasilnya dipasang ke UI thread. Beberapa permintaan beruntun (titik baru,
+     * event BLE, status sinkron) digabung menjadi satu.
+     */
     private void refreshAll() {
         if (selectedSurveyId < 0 || countText == null) return;
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        int withElevation = 0, trackCount = 0, waypointCount = 0;
+        refreshHandler.removeCallbacks(refreshTask);
+        refreshHandler.postDelayed(refreshTask, REFRESH_DEBOUNCE_MS);
+    }
+
+    private void startSnapshotRead() {
+        if (isFinishing() || isDestroyed()) return;
+        final long surveyId = selectedSurveyId;
+        final long generation = refreshGeneration.incrementAndGet();
+        refreshExecutor.execute(() -> {
+            if (generation != refreshGeneration.get()) return; // sudah ada permintaan lebih baru
+            UiSnapshot snapshot;
+            try {
+                snapshot = readSnapshot(surveyId);
+            } catch (RuntimeException e) {
+                return; // proyek mungkin dihapus saat pembacaan berjalan
+            }
+            runOnUiThread(() -> applySnapshot(snapshot, generation));
+        });
+    }
+
+    private UiSnapshot readSnapshot(long surveyId) {
+        List<SurveyDatabase.Point> points = database.getPoints(surveyId);
+        Set<String> participants = new HashSet<>();
+        int waypointCount = 0, withElevation = 0;
         for (SurveyDatabase.Point p : points) {
+            if (p.waypoint) waypointCount++;
+            else if (p.participantId != null && !p.participantId.isEmpty()) participants.add(p.participantId);
             if (p.gpsAltitude != null) withElevation++;
-            if (p.waypoint) waypointCount++; else trackCount++;
         }
-        countText.setText(points.size() + " catatan • " + database.countParticipants(selectedSurveyId) + " peserta");
-        elevationCountText.setText(withElevation + " titik elevasi • " + waypointCount + " waypoint");
+        List<SurveyDatabase.Presence> presence = database.getPresence(surveyId);
+        long datasetId = database.getSurveyElevationDatasetId(surveyId);
+        SurveyDatabase.ElevationDataset dataset = datasetId < 0 ? null : database.getElevationDataset(datasetId);
+        if (datasetId >= 0 && dataset == null) {
+            database.setSurveyElevationDataset(surveyId, -1);
+            datasetId = -1;
+        }
+        boolean hasDatasets = !database.getElevationDatasets().isEmpty();
+        SurveyDatabase.ReferenceTrack reference = database.getReferenceTrack(surveyId);
+        List<double[]> referenceCoordinates = reference == null
+                ? new ArrayList<>() : database.getReferenceCoordinates(surveyId);
+        return new UiSnapshot(surveyId, database.getSurvey(surveyId), points, presence,
+                participants.size(), waypointCount, withElevation, datasetId, dataset, hasDatasets,
+                reference, referenceCoordinates);
+    }
+
+    private void applySnapshot(UiSnapshot s, long generation) {
+        if (countText == null || isFinishing() || isDestroyed()) return;
+        if (generation != refreshGeneration.get() || s.surveyId != selectedSurveyId) return;
+        int trackCount = s.points.size() - s.waypointCount;
+        countText.setText(s.points.size() + " catatan • " + s.participants + " peserta");
+        elevationCountText.setText(s.withElevation + " titik elevasi • " + s.waypointCount + " waypoint");
+        recentText.setText(buildRecentSummary(s.points));
+        applyProjectHeader(s.survey, s.points.size(), s.waypointCount, s.participants);
+        updateStatusChips(s.survey);
+        updateGroupUi(s.survey, s.presence);
+        updateElevationDatasetUi(s.dataset, s.hasDatasets);
+        updateExportStatus(s.points.size());
+        updateWaypointList(s.points);
+        updatePressureUi();
+        updatePermissionState();
+        updateRecordingUi(trackCount);
+        if (mapView != null) mapView.setRoute(s.points, s.surveyId);
+        applyReferenceTrack(s.reference, s.referenceCoordinates);
+        refreshRouteProfile(s.points, s.surveyId, s.datasetId);
+        refreshTerrain(s.points, s.surveyId, s.datasetId);
+        // Data baru memicu sinkron otomatis; ID job tetap membuat permintaan beruntun digabung.
+        MongoSyncScheduler.requestSync(this, 12000);
+    }
+
+    private String buildRecentSummary(List<SurveyDatabase.Point> points) {
+        if (points.isEmpty()) return "Belum ada titik.";
         StringBuilder recent = new StringBuilder();
         int start = Math.max(0, points.size() - 5);
         for (int i = points.size() - 1; i >= start; i--) {
@@ -1862,60 +2020,40 @@ public final class MainActivity extends Activity implements LocationListener, Se
             if (!p.label.isEmpty()) recent.append(" • ").append(p.label);
             recent.append('\n');
         }
-        recentText.setText(recent.length() == 0 ? "Belum ada titik." : recent.toString().trim());
-        updateProjectHeader();
-        updateStatusChips();
-        updateGroupUi();
-        updateElevationDatasetUi();
-        updateExportStatus();
-        updateWaypointList(points);
-        updatePressureUi();
-        updatePermissionState();
-        updateRecordingUi(trackCount);
-        if (mapView != null) mapView.setRoute(points, selectedSurveyId);
-        refreshReferenceTrack();
-        refreshRouteProfile(points, selectedSurveyId);
-        refreshTerrain(points, selectedSurveyId);
-        // Data baru memicu sinkron otomatis; ID job tetap membuat permintaan beruntun digabung.
-        MongoSyncScheduler.requestSync(this, 12000);
+        return recent.toString().trim();
     }
 
     /** Refreshes GPS / internet / barometer / BLE chips from the current runtime state. */
-    private void updateStatusChips() {
+    private void updateStatusChips() { updateStatusChips(currentSurvey()); }
+
+    private void updateStatusChips(SurveyDatabase.Survey survey) {
         if (gpsChip == null) return;
         boolean precise = hasPreciseLocation();
         if (!precise) gpsChip.set(UiKit.TONE_DANGER, "Izin lokasi");
         else if (hasFreshFix()) gpsChip.set(UiKit.TONE_SUCCESS, "GPS aktif");
         else gpsChip.set(UiKit.TONE_WARNING, "Menunggu fix");
 
-        boolean online = false;
-        if (connectivityManager != null) {
-            Network network = connectivityManager.getActiveNetwork();
-            NetworkCapabilities caps = network == null ? null : connectivityManager.getNetworkCapabilities(network);
-            online = caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-        }
-        if (online) netChip.set(UiKit.TONE_SUCCESS, "Jaringan ada");
+        int netState = networkState();
+        if (netState == NET_VALIDATED) netChip.set(UiKit.TONE_SUCCESS, "Jaringan ada");
+        else if (netState == NET_LIMITED) netChip.set(UiKit.TONE_WARNING, "Jaringan terbatas");
         else netChip.set(UiKit.TONE_NEUTRAL, "Offline");
 
         if (pressureSensor == null) baroChip.set(UiKit.TONE_NEUTRAL, "Tanpa barometer");
         else if (pressureHpa == null) baroChip.set(UiKit.TONE_WARNING, "Baro menunggu");
         else baroChip.set(UiKit.TONE_SUCCESS, String.format(Locale.getDefault(), "%.0f hPa", pressureHpa));
 
-        SurveyDatabase.Survey s = currentSurvey();
-        boolean bleOn = s != null && !s.groupCode.isEmpty();
+        boolean bleOn = survey != null && !survey.groupCode.isEmpty();
         bleChip.set(bleOn ? (LocationLoggingService.isLogging ? UiKit.TONE_SUCCESS : UiKit.TONE_PRIMARY)
                         : UiKit.TONE_NEUTRAL,
                 bleOn ? (LocationLoggingService.isLogging ? "BLE mencatat" : "BLE siap") : "BLE nonaktif");
     }
 
-    private void updateGroupUi() {
-        SurveyDatabase.Survey s = currentSurvey();
-        if (s == null) return;
+    private void updateGroupUi(SurveyDatabase.Survey s, List<SurveyDatabase.Presence> events) {
+        if (s == null || groupText == null) return;
         if (s.participantId.isEmpty()) groupText.setText("ID peserta belum dibuat; akan dibuat otomatis untuk proyek ini.");
         else if (s.groupCode.isEmpty()) groupText.setText("BLE nonaktif • ID peserta outing: " + s.participantId + " • alias: " + (s.participantAlias.isEmpty() ? "belum diatur" : s.participantAlias));
         else groupText.setText("Kode outing: " + s.groupCode + " • ID samaran: " + s.participantId + " • alias: " + s.participantAlias);
         groupButton.setEnabled(!LocationLoggingService.isLogging);
-        List<SurveyDatabase.Presence> events = database.getPresence(selectedSurveyId);
         Set<String> peers = new HashSet<>();
         long latest = 0;
         for (SurveyDatabase.Presence event : events) {
@@ -1935,8 +2073,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         SurveyDatabase.ElevationDataset dataset = datasetId < 0 ? null : database.getElevationDataset(datasetId);
         if (datasetId >= 0 && dataset == null) {
             database.setSurveyElevationDataset(selectedSurveyId, -1);
-            datasetId = -1;
+            dataset = null;
         }
+        updateElevationDatasetUi(dataset, !database.getElevationDatasets().isEmpty());
+    }
+
+    private void updateElevationDatasetUi(SurveyDatabase.ElevationDataset dataset, boolean hasDatasets) {
+        if (elevationDatasetText == null) return;
         if (dataset == null) {
             elevationDatasetText.setText("Belum ada dataset aktif • profil memakai elevasi rekaman GPS/rombongan.");
             deleteElevationButton.setEnabled(false);
@@ -1947,7 +2090,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             elevationDatasetText.setText("Aktif: " + dataset.name + "\n" + dataset.sampleCount + " sampel • datum vertikal: " + dataset.verticalDatum + datumNote);
             deleteElevationButton.setEnabled(true);
         }
-        selectElevationButton.setEnabled(!database.getElevationDatasets().isEmpty());
+        selectElevationButton.setEnabled(hasDatasets);
     }
 
     private void chooseElevationDataset() {
@@ -2016,10 +2159,14 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (recordText == null) return;
         boolean recording = LocationLoggingService.isLogging;
         if (recording) startingRecording = false;
-        if (recording) {
-            recordText.setText("Perekaman GPS aktif untuk proyek ini • " + trackCount + " catatan track tersimpan. Jika outing disetel, BLE presence berjalan lokal; pantau notifikasi.");
-        } else {
-            recordText.setText("Perekaman berhenti. Track dan event yang tersimpan tetap ada di proyek ini.");
+        // Peringatan (gagal mulai / tidak ada fix) dipertahankan agar terbaca.
+        boolean notice = System.currentTimeMillis() - recordNoticeAt < 120_000L;
+        if (!notice) {
+            if (recording) {
+                recordText.setText("Perekaman GPS aktif untuk proyek ini • " + trackCount + " catatan track tersimpan. Jika outing disetel, BLE presence berjalan lokal; pantau notifikasi.");
+            } else {
+                recordText.setText("Perekaman berhenti. Track dan event yang tersimpan tetap ada di proyek ini.");
+            }
         }
         if (bottomDetail != null) {
             if (recording)
@@ -2039,28 +2186,32 @@ public final class MainActivity extends Activity implements LocationListener, Se
         syncRecordingControls();
     }
 
-    private void refreshTerrain(List<SurveyDatabase.Point> snapshot, long surveyId) {
+    private void refreshTerrain(List<SurveyDatabase.Point> snapshot, long surveyId, long datasetId) {
         if (terrainExecutor().isShutdown() || terrainStatus == null) return;
-        terrainStatus.setText("Menghitung coverage terrain lokal…");
-        long datasetId = database.getSurveyElevationDatasetId(surveyId);
+        // Jangan menulis "menghitung" setiap titik baru: teks berkedip tiap
+        // 5 detik saat merekam. Cukup saat proyek berganti atau hasil pertama.
+        if (terrainSurveyId != surveyId) {
+            terrainStatus.setText("Menghitung coverage terrain lokal…");
+            terrainSurveyId = surveyId;
+        }
         final long requestId = terrainRequest.incrementAndGet();
         profileExecutor.execute(() -> {
             // Permintaan yang sudah basi dilewati, bukan dihitung lalu dibuang.
             if (requestId != terrainRequest.get()) return;
             List<TerrainEngine.Sample> samples = new ArrayList<>();
             String datum = "unknown";
-            if (datasetId >= 0) {
-                SurveyDatabase.ElevationDataset d = database.getElevationDataset(datasetId);
-                if (d != null) {
-                    datum = d.verticalDatum;
-                    for (LocalElevationEngine.Sample x : database.getElevationSamples(datasetId)) samples.add(new TerrainEngine.Sample(x.latitude,x.longitude,x.elevationMeters,d.verticalDatum));
-                    if (!TerrainEngine.datumGroup(d.verticalDatum).startsWith("UNKNOWN:")) {
-                        for (SurveyDatabase.Point p : snapshot) if (p.gpsAltitude != null)
-                            if (TerrainEngine.compatibleDatum(p.source, d.verticalDatum))
-                                samples.add(new TerrainEngine.Sample(p.lat,p.lon,p.gpsAltitude,p.source));
-                    }
+            SurveyDatabase.ElevationDataset d = datasetId >= 0 ? database.getElevationDataset(datasetId) : null;
+            if (d != null) {
+                datum = d.verticalDatum;
+                for (LocalElevationEngine.Sample x : database.getElevationSamples(datasetId)) samples.add(new TerrainEngine.Sample(x.latitude,x.longitude,x.elevationMeters,d.verticalDatum));
+                if (!TerrainEngine.datumGroup(d.verticalDatum).startsWith("UNKNOWN:")) {
+                    for (SurveyDatabase.Point p : snapshot) if (p.gpsAltitude != null)
+                        if (TerrainEngine.compatibleDatum(p.source, d.verticalDatum))
+                            samples.add(new TerrainEngine.Sample(p.lat,p.lon,p.gpsAltitude,p.source));
                 }
             } else {
+                // Dataset hilang/terhapus di antara pembacaan snapshot dan
+                // perhitungan: tetap tampilkan elevasi GPS, jangan kosongkan terrain.
                 java.util.Map<String, List<SurveyDatabase.Point>> byDatum = new java.util.HashMap<>();
                 for (SurveyDatabase.Point p : snapshot) if (p.gpsAltitude != null) {
                     String group = TerrainEngine.datumGroup(p.source);
@@ -2113,10 +2264,12 @@ public final class MainActivity extends Activity implements LocationListener, Se
     }
     private ExecutorService terrainExecutor() { return profileExecutor; }
 
-    private void refreshRouteProfile(List<SurveyDatabase.Point> snapshot, long surveyId) {
+    private void refreshRouteProfile(List<SurveyDatabase.Point> snapshot, long surveyId, long datasetId) {
         if (profileExecutor.isShutdown()) return;
-        profileText.setText("Menghitung profil jalur satu rute…");
-        long datasetId = database.getSurveyElevationDatasetId(surveyId);
+        if (profileSurveyId != surveyId) {
+            profileText.setText("Menghitung profil jalur satu rute…");
+            profileSurveyId = surveyId;
+        }
         final long requestId = profileRequest.incrementAndGet();
         profileExecutor.execute(() -> {
             if (requestId != profileRequest.get()) return;
@@ -2351,6 +2504,11 @@ public final class MainActivity extends Activity implements LocationListener, Se
         SurveyDatabase.ReferenceTrack track = database.getReferenceTrack(selectedSurveyId);
         List<double[]> coordinates = track == null
                 ? new ArrayList<>() : database.getReferenceCoordinates(selectedSurveyId);
+        applyReferenceTrack(track, coordinates);
+    }
+
+    private void applyReferenceTrack(SurveyDatabase.ReferenceTrack track, List<double[]> coordinates) {
+        if (mapView == null) return;
         mapView.setReferenceTrack(coordinates, track == null ? "" : track.name);
         if (referenceStatus != null) {
             referenceStatus.setText(track == null
@@ -2617,19 +2775,23 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private String exportKindKey(long surveyId) { return "last_export_kind_" + surveyId; }
 
     /** Records a successful export so the Data tab can show how stale the last backup is. */
-    private void markExported(String kind) {
-        if (selectedSurveyId < 0 || exportPrefs == null) return;
+    private void markExported(long surveyId, String kind) {
+        if (surveyId < 0 || exportPrefs == null) return;
         long now = System.currentTimeMillis();
         exportPrefs.edit()
-                .putLong(exportTimeKey(selectedSurveyId), now)
-                .putString(exportKindKey(selectedSurveyId), kind)
+                .putLong(exportTimeKey(surveyId), now)
+                .putString(exportKindKey(surveyId), kind)
                 .apply();
-        updateExportStatus();
+        if (selectedSurveyId == surveyId) updateExportStatus();
     }
 
     private void updateExportStatus() {
+        if (selectedSurveyId < 0) return;
+        updateExportStatus(database.countPoints(selectedSurveyId));
+    }
+
+    private void updateExportStatus(int points) {
         if (exportStatusText == null || exportStatusMeta == null || selectedSurveyId < 0) return;
-        int points = database.countPoints(selectedSurveyId);
         long last = exportPrefs == null ? 0 : exportPrefs.getLong(exportTimeKey(selectedSurveyId), 0L);
         String kind = exportPrefs == null ? "" : exportPrefs.getString(exportKindKey(selectedSurveyId), "");
         if (points == 0) {
@@ -2641,7 +2803,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (last <= 0) {
             exportStatusText.setText("Belum pernah diekspor");
             exportStatusText.setTextColor(getColor(R.color.warning));
-            exportStatusMeta.setText(points + " titik hanya ada di perangkat ini. Ekspor GPX/CSV sebagai cadangan; menghapus aplikasi atau data akan menghilangkannya.");
+            exportStatusMeta.setText(points + " titik tersimpan lokal dan dikirim otomatis ke MongoDB. Ekspor GPX/CSV tetap berguna sebagai cadangan yang bisa kamu buka sendiri.");
             return;
         }
         long days = Math.max(0, System.currentTimeMillis() - last) / 86_400_000L;
@@ -2670,8 +2832,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 : "Ekspor terakhir lebih dari 7 hari lalu.";
         new AlertDialog.Builder(this)
                 .setTitle("Cadangkan proyek ini?")
-                .setMessage(points + " titik tersimpan hanya di perangkat ini. " + detail
-                        + "\n\nTidak ada pencadangan otomatis atau cloud. GPX menyimpan jalur/waypoint; CSV juga menyimpan event BLE dan identitas peserta.")
+                .setMessage(points + " titik tersimpan di perangkat ini. " + detail
+                        + "\n\nData juga dikirim otomatis ke MongoDB milikmu saat ada koneksi, tetapi ekspor GPX/CSV membuat salinan yang bisa kamu buka tanpa aplikasi ini.")
                 .setNegativeButton("Nanti", null)
                 .setNeutralButton("Ekspor CSV", (dialog, which) -> beginExport(false))
                 .setPositiveButton("Ekspor GPX", (dialog, which) -> beginGpxExport())
@@ -2685,38 +2847,76 @@ public final class MainActivity extends Activity implements LocationListener, Se
         if (requestCode == REQ_IMPORT_ELEVATION) {
             showElevationImportDetails(uri);
         } else if (requestCode == REQ_IMPORT) {
-            try { importCsvFile(uri); }
-            catch (Exception e) {
-                new AlertDialog.Builder(this).setTitle("Impor gagal")
-                        .setMessage("File tidak dapat dibaca. Pilih CSV hasil ekspor Lereng Offline atau tabel dengan latitude, longitude, elevation_m.\n\n" + safeMessage(e))
-                        .setPositiveButton("Tutup", null).show();
+            // Impor berjalan di latar belakang: file besar tidak boleh membekukan layar.
+            final Uri target = uri;
+            final long surveyId = selectedSurveyId;
+            final SurveyDatabase.Survey profile = ensureLocalIdentity();
+            if (profile == null) {
+                Toast.makeText(this, "Impor gagal: proyek aktif tidak ditemukan.", Toast.LENGTH_LONG).show();
+                return;
             }
+            ioExecutor.execute(() -> {
+                try {
+                    String message = importCsvFile(target, surveyId, profile);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (selectedSurveyId == surveyId) refreshAll();
+                        new AlertDialog.Builder(this).setTitle("Impor selesai").setMessage(message)
+                                .setPositiveButton("Selesai", null).show();
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        new AlertDialog.Builder(this).setTitle("Impor gagal")
+                                .setMessage("File tidak dapat dibaca. Pilih CSV hasil ekspor Lereng Offline atau tabel dengan latitude, longitude, elevation_m.\n\n" + safeMessage(e))
+                                .setPositiveButton("Tutup", null).show();
+                    });
+                }
+            });
         } else if (requestCode == REQ_IMPORT_GPX) {
             prepareGpxImport(uri);
         } else if (requestCode == REQ_IMPORT_REFERENCE_GPX) {
             prepareReferenceGpxImport(uri);
         } else if (requestCode == REQ_EXPORT_CSV || requestCode == REQ_EXPORT_GEOJSON
                 || requestCode == REQ_EXPORT_GPX || requestCode == REQ_EXPORT_JSONL) {
-            try {
-                String content = requestCode == REQ_EXPORT_GEOJSON ? buildGeoJson()
-                        : requestCode == REQ_EXPORT_GPX ? buildGpx()
-                        : requestCode == REQ_EXPORT_JSONL ? buildJsonLines() : buildCsv();
-                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
-                    if (out == null) throw new IllegalStateException("Lokasi file tidak dapat ditulis");
-                    out.write(content.getBytes(StandardCharsets.UTF_8));
-                    out.flush();
+            // Susun dan tulis file di latar belakang: proyek besar bisa membuat
+            // layar membeku bila semuanya dikerjakan di UI thread.
+            final int code = requestCode;
+            final Uri target = uri;
+            final long surveyId = selectedSurveyId;
+            final SurveyDatabase.Survey survey = currentSurvey();
+            final String project = selectedSurveyName();
+            final String datumLabel = pendingGpxDatum;
+            ioExecutor.execute(() -> {
+                try {
+                    String content = code == REQ_EXPORT_GEOJSON ? buildGeoJson(surveyId, survey, project)
+                            : code == REQ_EXPORT_GPX ? buildGpx(surveyId, project, datumLabel)
+                            : code == REQ_EXPORT_JSONL ? buildJsonLines(surveyId, survey, project)
+                            : buildCsv(surveyId, survey);
+                    try (OutputStream out = getContentResolver().openOutputStream(target, "wt")) {
+                        if (out == null) throw new IllegalStateException("Lokasi file tidak dapat ditulis");
+                        out.write(content.getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                    }
+                    String kind = code == REQ_EXPORT_GEOJSON ? "GeoJSON"
+                            : code == REQ_EXPORT_GPX ? "GPX"
+                            : code == REQ_EXPORT_JSONL ? "JSONL" : "CSV";
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        markExported(surveyId, kind);
+                        Toast.makeText(this, "Cadangan " + kind + " berhasil diekspor.", Toast.LENGTH_LONG).show();
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        Toast.makeText(this, "Ekspor gagal: " + safeMessage(e), Toast.LENGTH_LONG).show();
+                    });
                 }
-                String kind = requestCode == REQ_EXPORT_GEOJSON ? "GeoJSON"
-                        : requestCode == REQ_EXPORT_GPX ? "GPX"
-                        : requestCode == REQ_EXPORT_JSONL ? "JSONL" : "CSV";
-                markExported(kind);
-                Toast.makeText(this, "Cadangan " + kind + " berhasil diekspor.", Toast.LENGTH_LONG).show();
-            } catch (Exception e) { Toast.makeText(this, "Ekspor gagal: " + safeMessage(e), Toast.LENGTH_LONG).show(); }
+            });
         }
     }
 
-    private void importCsvFile(Uri uri) throws Exception {
-        SurveyDatabase.Survey profile = ensureLocalIdentity();
+    private String importCsvFile(Uri uri, long surveyId, SurveyDatabase.Survey profile) throws Exception {
         if (profile == null) throw new IllegalStateException("Proyek aktif tidak ditemukan");
         String fallbackId = BleGroupCodec.newParticipantId();
         String fallbackAlias = importFileAlias(uri, fallbackId);
@@ -2776,7 +2976,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                     if (recordType.equals("presence")) {
                         String peerId = cell(cells, peerCol).trim();
                         if (peerId.isEmpty() || !peerId.matches("[A-Za-z0-9_-]{4,32}") || effectiveGroup.isEmpty()) throw new IllegalArgumentException("event presence tidak lengkap");
-                        if (database.recordPresence(selectedSurveyId, effectiveGroup, participantId, peerId, time)) presenceInserted++;
+                        if (database.recordPresence(surveyId, effectiveGroup, participantId, peerId, time)) presenceInserted++;
                         else duplicates++;
                         continue;
                     }
@@ -2798,19 +2998,18 @@ public final class MainActivity extends Activity implements LocationListener, Se
                     if (!importedDatum.isEmpty() && !source.toLowerCase(Locale.ROOT).contains(importedDatum.toLowerCase(Locale.ROOT)))
                         source += " [elevation reference: " + importedDatum + "]";
                     boolean waypoint = recordType.equals("waypoint") || "true".equalsIgnoreCase(cell(cells, waypointCol)) || "1".equals(cell(cells, waypointCol));
-                    SurveyDatabase.Point point = new SurveyDatabase.Point(selectedSurveyId, time, lat, lon, alt, hacc, vacc, pressure, baro, source,
+                    SurveyDatabase.Point point = new SurveyDatabase.Point(surveyId, time, lat, lon, alt, hacc, vacc, pressure, baro, source,
                             label.isEmpty() ? "Impor CSV • baris " + rowNumber : label, participantId, participantAlias, effectiveGroup, waypoint);
                     if (database.addPoint(point)) inserted++; else duplicates++;
                 } catch (Exception e) { invalid++; }
             }
         }
-        refreshAll();
-        StringBuilder message = new StringBuilder(inserted + " titik track/waypoint dan " + presenceInserted + " event presence ditambahkan ke proyek “" + selectedSurveyName() + "”.");
+        StringBuilder message = new StringBuilder(inserted + " titik track/waypoint dan " + presenceInserted + " event presence ditambahkan ke proyek “" + profile.name + "”.");
         if (duplicates > 0) message.append("\n").append(duplicates).append(" baris duplikat diabaikan.");
         if (wrongGroup > 0) message.append("\n").append(wrongGroup).append(" baris outing lain/tanpa kode yang cocok dilewati. Atur kode rombongan yang sama sebelum mengimpor.");
         if (invalid > 0) message.append("\n").append(invalid).append(" baris dilewati karena format/koordinat tidak valid.");
         message.append("\n\nData tetap tersimpan lokal. Track peserta digabung untuk satu profil jalur, bukan kontur area.");
-        new AlertDialog.Builder(this).setTitle("Impor selesai").setMessage(message.toString()).setPositiveButton("Selesai", null).show();
+        return message.toString();
     }
 
     private static String gpxDedupeKey(long time, String participantId, boolean waypoint) {
@@ -2848,12 +3047,11 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private Double parseNullableDouble(String value) { if (value == null || value.trim().isEmpty()) return null; return Double.parseDouble(value.trim()); }
     private Float parseNullableFloat(String value) { if (value == null || value.trim().isEmpty()) return null; return Float.parseFloat(value.trim()); }
 
-    private String buildCsv() {
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        List<SurveyDatabase.Presence> events = database.getPresence(selectedSurveyId);
-        SurveyDatabase.Survey s = currentSurvey();
-        String localId = s == null ? "" : s.participantId;
-        String localAlias = s == null ? "" : s.participantAlias;
+    private String buildCsv(long surveyId, SurveyDatabase.Survey survey) {
+        List<SurveyDatabase.Point> points = database.getPoints(surveyId);
+        List<SurveyDatabase.Presence> events = database.getPresence(surveyId);
+        String localId = survey == null ? "" : survey.participantId;
+        String localAlias = survey == null ? "" : survey.participantAlias;
         StringBuilder b = new StringBuilder();
         CsvCodec.appendRow(b, "record_type", "group_code", "participant_id", "participant_alias", "latitude", "longitude",
                 "elevation_m", "accuracy_m", "vertical_accuracy_m", "pressure_hpa", "barometer_relative_elevation_m",
@@ -2879,13 +3077,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         return b.toString();
     }
 
-    private String buildGpx() {
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        boolean withElevation = pendingGpxDatum != null && !pendingGpxDatum.isEmpty();
+    private String buildGpx(long surveyId, String projectName, String datumLabel) {
+        List<SurveyDatabase.Point> points = database.getPoints(surveyId);
+        boolean withElevation = datumLabel != null && !datumLabel.isEmpty();
         List<SurveyDatabase.Point> export = new ArrayList<>(points.size());
         for (SurveyDatabase.Point point : points) {
             if (withElevation && point.gpsAltitude != null
-                    && !pendingGpxDatum.equals(elevationReferenceFor(point))) {
+                    && !datumLabel.equals(elevationReferenceFor(point))) {
                 export.add(GpxCodec.withoutElevation(point));
             } else {
                 export.add(point);
@@ -2893,9 +3091,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
         }
         String note = "Satu jalur per proyek; track bukan kontur area."
                 + (withElevation
-                ? " Referensi elevasi: " + pendingGpxDatum + ". Elevasi tidak dikonversi."
+                ? " Referensi elevasi: " + datumLabel + ". Elevasi tidak dikonversi."
                 : " Ekspor tanpa elevasi; hanya koordinat dan waktu.");
-        return GpxCodec.build(selectedSurveyName(), note, pendingGpxDatum, export,
+        return GpxCodec.build(projectName, note, datumLabel, export,
                 System.currentTimeMillis());
     }
 
@@ -2916,10 +3114,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
         return "Android Location altitude; WGS84 ellipsoid";
     }
 
-    private String buildGeoJson() throws Exception {
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        SurveyDatabase.Survey survey = currentSurvey();
-        String project = selectedSurveyName();
+    private String buildGeoJson(long surveyId, SurveyDatabase.Survey survey, String project) throws Exception {
+        List<SurveyDatabase.Point> points = database.getPoints(surveyId);
         JSONArray features = new JSONArray();
 
         List<SurveyDatabase.Point> track = new ArrayList<>();
@@ -3042,11 +3238,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
      * Newline-delimited GeoJSON Features (one document per stored record) for
      * {@code mongoimport} or the bundled {@code tools/geojson_to_mongodb.py}.
      */
-    private String buildJsonLines() throws Exception {
-        List<SurveyDatabase.Point> points = database.getPoints(selectedSurveyId);
-        List<SurveyDatabase.Presence> events = database.getPresence(selectedSurveyId);
-        SurveyDatabase.Survey survey = currentSurvey();
-        String project = selectedSurveyName();
+    private String buildJsonLines(long surveyId, SurveyDatabase.Survey survey, String project) throws Exception {
+        List<SurveyDatabase.Point> points = database.getPoints(surveyId);
+        List<SurveyDatabase.Presence> events = database.getPresence(surveyId);
         String exportedAt = Instant.ofEpochMilli(System.currentTimeMillis()).toString();
         StringBuilder out = new StringBuilder(1024 + points.size() * 420);
 
@@ -3160,27 +3354,38 @@ public final class MainActivity extends Activity implements LocationListener, Se
     }
 
     private boolean hasValidatedInternet() {
-        if (connectivityManager == null) return false;
+        return networkState() == NET_VALIDATED;
+    }
+
+    /** Satu sumber kebenaran untuk status jaringan agar chip tidak berubah label. */
+    private static final int NET_OFFLINE = 0;
+    private static final int NET_LIMITED = 1;
+    private static final int NET_VALIDATED = 2;
+
+    private int networkState() {
+        if (connectivityManager == null) return NET_OFFLINE;
         Network active = connectivityManager.getActiveNetwork();
         NetworkCapabilities capabilities = active == null ? null : connectivityManager.getNetworkCapabilities(active);
-        return capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        if (capabilities == null || !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+            return NET_OFFLINE;
+        }
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? NET_VALIDATED : NET_LIMITED;
     }
 
     private void refreshNetworkStatus() {
-        if (networkText == null) return;
-        if (connectivityManager == null) {
-            networkText.setText("Status internet tidak dapat dipantau; provider GNSS tetap diminta.");
-        } else if (hasValidatedInternet()) {
-            networkText.setText("Internet tervalidasi • provider jaringan Android dapat membantu; GNSS tetap diminta bila tersedia. Track tidak diunggah otomatis.");
-        } else {
-            networkText.setText("Internet tidak tersedia/tervalidasi • GNSS tetap diminta bila tersedia; rekaman tidak berhenti.");
+        int state = networkState();
+        if (networkText != null) {
+            if (state == NET_VALIDATED) {
+                networkText.setText("Internet tervalidasi • GNSS tetap diminta bila tersedia. Titik tersimpan lokal dan diunggah otomatis.");
+            } else if (state == NET_LIMITED) {
+                networkText.setText("Jaringan tersambung tetapi belum tervalidasi • rekaman tetap berjalan dan diunggah otomatis saat internet benar-benar pulih.");
+            } else {
+                networkText.setText("Internet tidak tersedia • GNSS tetap diminta bila tersedia; rekaman tetap berjalan dan diunggah otomatis saat koneksi kembali.");
+            }
         }
         if (netChip != null) {
-            if (connectivityManager != null && hasValidatedInternet())
-                netChip.set(UiKit.TONE_SUCCESS, "Internet ada");
-            else if (connectivityManager != null && connectivityManager.getActiveNetwork() != null)
-                netChip.set(UiKit.TONE_WARNING, "Jaringan mentah");
+            if (state == NET_VALIDATED) netChip.set(UiKit.TONE_SUCCESS, "Jaringan ada");
+            else if (state == NET_LIMITED) netChip.set(UiKit.TONE_WARNING, "Jaringan terbatas");
             else netChip.set(UiKit.TONE_NEUTRAL, "Offline");
         }
     }
@@ -3327,6 +3532,9 @@ public final class MainActivity extends Activity implements LocationListener, Se
         stopPulse();
         if (bottomPrimary != null) bottomPrimary.animate().cancel();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        refreshHandler.removeCallbacks(refreshTask);
+        refreshExecutor.shutdownNow();
+        ioExecutor.shutdownNow();
         profileExecutor.shutdownNow();
         if (database != null) database.close();
         super.onDestroy();

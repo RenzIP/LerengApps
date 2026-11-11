@@ -154,11 +154,20 @@ public final class TerrainView extends View {
         paint.setColor(color(R.color.terrain_badge_bg));
         canvas.drawRoundRect(left, top, right, bottom, dp(11), dp(11), paint);
 
-        text.setTextSize(dp(10));
+        text.setTextSize(sp(10));
         text.setFakeBoldText(true);
         text.setColor(color(R.color.terrain_badge_text));
-        canvas.drawText(badge, width / 2f, top + dp(18), text);
+        // Label panjang tidak boleh terpotong di layar sempit; pendekkan dengan elipsis.
+        canvas.drawText(ellipsize(badge, right - left - dp(16)), width / 2f, top + dp(18), text);
         text.setFakeBoldText(false);
+    }
+
+    private String ellipsize(String value, float maxWidth) {
+        if (maxWidth <= 0 || text.measureText(value) <= maxWidth) return value;
+        String suffix = "…";
+        int end = value.length();
+        while (end > 0 && text.measureText(value.substring(0, end) + suffix) > maxWidth) end--;
+        return value.substring(0, Math.max(0, end)).trim() + suffix;
     }
 
     private void drawEmptyState(Canvas canvas) {
@@ -171,9 +180,9 @@ public final class TerrainView extends View {
         stroke.setPathEffect(null);
 
         text.setColor(color(R.color.text_faint));
-        text.setTextSize(dp(13));
+        text.setTextSize(sp(13));
         canvas.drawText("Belum ada permukaan terrain", w / 2f, h / 2f - dp(12), text);
-        text.setTextSize(dp(11));
+        text.setTextSize(sp(11));
         canvas.drawText("Rekam titik elevasi atau impor dataset CSV", w / 2f, h / 2f + dp(10), text);
     }
 
@@ -229,4 +238,5 @@ public final class TerrainView extends View {
     private double minSampleElevation(TerrainEngine.Result value) { double z = Double.POSITIVE_INFINITY; for (TerrainEngine.Sample s : value.samples) z = Math.min(z, s.elevationMeters); return Double.isFinite(z) ? z : 0; }
     private double maxSampleElevation(TerrainEngine.Result value) { double z = Double.NEGATIVE_INFINITY; for (TerrainEngine.Sample s : value.samples) z = Math.max(z, s.elevationMeters); return Double.isFinite(z) ? z : 1; }
     private float dp(float value) { return value * getResources().getDisplayMetrics().density; }
+    private float sp(float value) { return value * getResources().getDisplayMetrics().scaledDensity; }
 }

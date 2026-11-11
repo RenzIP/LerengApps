@@ -1,20 +1,22 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 16,
-  "versionName": "2.5.7",
+  "versionCode": 17,
+  "versionName": "2.5.8",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.7/LerengOffline-2.5.7.apk",
-  "sizeBytes": 2706101,
-  "sha256": "38bce1a7ef26441fdc8d6bd12eccb104afcc934946338c2c4e5d86157d0097ec",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.8/LerengOffline-2.5.8.apk",
+  "sizeBytes": 2709645,
+  "sha256": "ba0e4b58f92125e5805e45184027414dbd009970a40e52fdaaebb615224c94a0",
   "notes": [
-    "Perekaman tidak lagi mengaku aktif bila tidak ada sumber lokasi; muncul pesan gagal dan perekaman berhenti",
-    "Titik terakhir ikut tersimpan saat tombol Hentikan ditekan, jadi titik puncak tidak hilang",
-    "Peringatan otomatis bila lebih dari 2 menit tidak ada titik baru: GPS belum fix, GPS mati, atau izin dicabut",
-    "Impor CSV tidak lagi menggeser kolom koordinat karena tanda kutip di tengah label",
-    "Impor GPX membaca waktu tanpa offset sebagai UTC dan menerima titik rute (rtept)",
-    "Aplikasi membuka proyek terakhir yang dipakai; waypoint tidak lagi menulis ulang seluruh tabel titik",
-    "Tombol dan kolom input mengikuti ukuran font sehingga label tidak terpotong; layar dikunci portrait"
+    "Merekam tidak lagi tersendat: data layar dibaca di latar belakang dan digabung, bukan di UI thread setiap titik",
+    "Status jaringan memakai satu sumber: label chip konsisten dan teks lama yang menyatakan track tidak diunggah otomatis sudah dihapus",
+    "Peringatan GPS tidak memberi titik atau gagal mulai bertahan 2 menit, tidak lagi tertimpa status tiap 5 detik",
+    "Tombol bawah menampilkan Memulai… dan tidak bisa ditekan selama layanan belum aktif, bukan mengaku Hentikan",
+    "Ekspor dan impor CSV/GPX berjalan di latar belakang sehingga proyek besar tidak membekukan layar",
+    "Ekspor tetap tercatat pada proyek yang benar walaupun kamu berpindah proyek saat file sedang ditulis",
+    "Teks cadangan tidak lagi bertentangan dengan sinkron otomatis ke MongoDB",
+    "Judul kartu, statistik, dan header tidak terpotong saat ukuran font diperbesar",
+    "Terrain tidak kosong bila dataset elevasi terhapus di tengah perhitungan, dan teks menghitung tidak berkedip tiap titik"
   ],
-  "publishedAt": "2026-11-11T11:45:00Z"
+  "publishedAt": "2026-11-11T13:30:00Z"
 }

@@ -202,8 +202,14 @@ public final class RouteProfileView extends View {
 
         labelPaint.setTextAlign(Paint.Align.CENTER);
         labelPaint.setColor(color(R.color.text_muted));
+        String text = String.format(Locale.getDefault(), "%.0f m", s.elevationMeters);
+        // Label harus tetap di dalam area plot: label titik tertinggi dulu bisa
+        // terpotong di tepi atas, dan label terendah menabrak sumbu bawah.
         float labelY = highest ? y - dp(8) : y + dp(15);
-        canvas.drawText(String.format(Locale.getDefault(), "%.0f m", s.elevationMeters), x, labelY, labelPaint);
+        labelY = Math.max(plot.top + sp(10), Math.min(plot.bottom - dp(4), labelY));
+        float halfText = labelPaint.measureText(text) / 2f;
+        float labelX = Math.max(plot.left + halfText, Math.min(plot.right - halfText, x));
+        canvas.drawText(text, labelX, labelY, labelPaint);
         labelPaint.setColor(color(R.color.chart_axis));
     }
 
