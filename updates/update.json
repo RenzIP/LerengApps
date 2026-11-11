@@ -1,17 +1,20 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 15,
-  "versionName": "2.5.6",
+  "versionCode": 16,
+  "versionName": "2.5.7",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.6/LerengOffline-2.5.6.apk",
-  "sizeBytes": 2704745,
-  "sha256": "32b875d2a5d4ce5dcc9e45b73b5d1a65f79b14ee0f8b79d4456678183f4c4e39",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.7/LerengOffline-2.5.7.apk",
+  "sizeBytes": 2706101,
+  "sha256": "38bce1a7ef26441fdc8d6bd12eccb104afcc934946338c2c4e5d86157d0097ec",
   "notes": [
-    "Sinkron otomatis langsung aktif: endpoint dan kunci aplikasi sudah tertanam, tidak ada isian apa pun",
-    "Tab Data tidak lagi meminta alamat atau token; pengaturan lanjutan tetap tersedia bila perlu",
-    "Kunci aplikasi bukan rahasia; server membatasi laju 120 permintaan per menit per IP",
-    "Rekaman offline tetap berjalan dan data dikirim sendiri saat koneksi kembali"
+    "Perekaman tidak lagi mengaku aktif bila tidak ada sumber lokasi; muncul pesan gagal dan perekaman berhenti",
+    "Titik terakhir ikut tersimpan saat tombol Hentikan ditekan, jadi titik puncak tidak hilang",
+    "Peringatan otomatis bila lebih dari 2 menit tidak ada titik baru: GPS belum fix, GPS mati, atau izin dicabut",
+    "Impor CSV tidak lagi menggeser kolom koordinat karena tanda kutip di tengah label",
+    "Impor GPX membaca waktu tanpa offset sebagai UTC dan menerima titik rute (rtept)",
+    "Aplikasi membuka proyek terakhir yang dipakai; waypoint tidak lagi menulis ulang seluruh tabel titik",
+    "Tombol dan kolom input mengikuti ukuran font sehingga label tidak terpotong; layar dikunci portrait"
   ],
-  "publishedAt": "2026-11-11T06:10:00Z"
+  "publishedAt": "2026-11-11T11:45:00Z"
 }
