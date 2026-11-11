@@ -1,4 +1,4 @@
-# Lereng Offline 2.5.3
+# Lereng Offline 2.5.4
 
 Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga, unduhan dataset otomatis, atau unggahan track.
 
@@ -68,7 +68,25 @@ Tab **Data** menyediakan empat jalur ekspor:
 - **GeoJSON** — satu `LineString` rute plus `Point` waypoint dan metadata `lereng`. Geometri rute dibuat 2D bila referensi elevasi tidak seragam, agar datum tidak tercampur diam-diam.
 - **JSONL (MongoDB)** — satu Feature GeoJSON per baris untuk track, waypoint, dan presence BLE.
 
-Aplikasi tidak menghubungi MongoDB. Impor dilakukan dari komputer memakai URI milikmu:
+Aplikasi tidak pernah menyimpan URI MongoDB. Ada dua jalur untuk memasukkannya:
+
+### Tombol Kirim ke MongoDB (manual, butuh internet)
+
+Tab **Data** → kartu **Kirim ke MongoDB** meminta alamat endpoint HTTPS dan token.
+Server kecil di folder [`server/`](server/README.md) yang memegang `MONGODB_URI`;
+APK/IPA hanya menyimpan alamat dan token (Android: penyimpanan privat aplikasi,
+iOS: Keychain). Tombol ini mengirim **semua** data proyek aktif: titik track,
+waypoint, event presence BLE, dan metadata proyek. Jalur pembanding GPX tidak
+pernah ikut. Setiap Fitur punya `_id` stabil, jadi menekan tombol berulang hanya
+memperbarui dokumen yang sama—bukan menggandakan.
+
+Tidak ada unggahan otomatis atau background. Tanpa internet, rekaman tetap
+berjalan dan data bisa dikirim nanti. Endpoint harus HTTPS; alamat dasar seperti
+`https://proyek.vercel.app` otomatis diarahkan ke `/api/ingest`.
+
+### Impor manual dari komputer
+
+Impor dilakukan dari komputer memakai URI milikmu:
 
 ```powershell
 python -m pip install -r tools/requirements.txt
@@ -77,7 +95,6 @@ python tools/geojson_to_mongodb.py --db lereng --collection tracks "D:\ekspor\Ge
 ```
 
 Skrip membuat index `2dsphere`, memberi `_id` deterministik agar impor ulang tidak menggandakan data, dan mendukung `.geojson` maupun `.jsonl`. Detail, contoh query, dan catatan keamanan ada di [tools/README-mongodb.md](tools/README-mongodb.md). **Jangan menaruh URI atau kredensial di dalam APK/repo.**
-
 ## Pembaruan aplikasi
 
 Versi 2.5.0 menambahkan pemeriksaan pembaruan lewat satu manifes JSON publik. Aplikasi hanya
@@ -93,8 +110,8 @@ melakukan `GET` HTTPS ke manifes itu (±7 detik timeout, maksimal 64 KB) dan mem
 ```powershell
 # hasilkan manifes dari APK yang akan dirilis
 python tools\publish_update.py --apk app\build\outputs\apk\debug\app-debug.apk `
-  --version-code 12 --version-name 2.5.3 `
-  --apk-url https://contoh.example/lereng/LerengOffline-2.5.3.apk --mandatory
+  --version-code 13 --version-name 2.5.4 `
+  --apk-url https://contoh.example/lereng/LerengOffline-2.5.4.apk --mandatory
 
 # bangun APK yang menunjuk ke manifes tersebut
 .\gradlew.bat assembleDebug -PlerengUpdateUrl="https://contoh.example/lereng/update.json"
@@ -110,7 +127,7 @@ Rilis proyek ini memakai GitHub:
 
 ## Instalasi dan build
 
-Pasang `LerengOffline-2.5.3.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
+Pasang `LerengOffline-2.5.4.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
 
 ```bash
 ./gradlew assembleDebug

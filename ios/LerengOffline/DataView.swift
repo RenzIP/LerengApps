@@ -3,6 +3,7 @@ import SwiftUI
 struct DataView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showDeleteAll = false
+    @State private var showSendConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -10,6 +11,7 @@ struct DataView: View {
                 projectSection
                 pointsSection
                 exportSection
+                syncSection
                 resetSection
             }
             .listStyle(.insetGrouped)
@@ -26,7 +28,22 @@ struct DataView: View {
             } message: {
                 Text("Tindakan ini tidak dapat dibatalkan. Berkas yang sudah diekspor tetap ada di folder aplikasi.")
             }
+            .confirmationDialog("Kirim semua data ke MongoDB?", isPresented: $showSendConfirm,
+                                titleVisibility: .visible) {
+                Button("Kirim sekarang") { model.sendToMongo() }
+                Button("Batal", role: .cancel) {}
+            } message: {
+                Text("\(trackCount) titik track, \(waypointCount) waypoint, \(model.presence.count) event presence BLE, dan metadata proyek akan dikirim ke \(model.syncEndpoint). Jalur pembanding GPX tidak ikut.")
+            }
         }
+    }
+
+    private var trackCount: Int {
+        model.points.filter { !$0.isWaypoint && $0.hasValidCoordinate }.count
+    }
+
+    private var waypointCount: Int {
+        model.points.filter { $0.isWaypoint && $0.hasValidCoordinate }.count
     }
 
     private var projectSection: some View {
@@ -98,7 +115,64 @@ struct DataView: View {
         } header: {
             Text("Ekspor lokal")
         } footer: {
-            Text("Ekspor bersifat lokal dan tidak mengunggah apa pun. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi.")
+            Text("Ekspor bersifat lokal. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi. Unggahan hanya terjadi lewat tombol Kirim ke MongoDB di bawah.")
+        }
+    }
+
+    private var syncSection: some View {
+        Section {
+            TextField("https://proyek.vercel.app/api/ingest", text: $model.syncEndpoint)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.URL)
+
+            SecureField("Token yang sama dengan INGEST_TOKEN", text: $model.syncToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.password)
+
+            Button {
+                model.saveSyncSettings()
+            } label: {
+                Label("Simpan pengaturan", systemImage: "key")
+            }
+
+            Button {
+                showSendConfirm = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.up.doc.on.clipboard")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.isSyncing ? "Mengirim…" : "Kirim ke MongoDB")
+                            .font(.body)
+                        Text("Semua titik, waypoint, presence BLE, dan metadata proyek")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .disabled(model.isSyncing)
+
+            if let status = model.syncStatus {
+                Text(status)
+                    .font(.footnote)
+                    .foregroundStyle(status.hasPrefix("Terkirim") ? Color.green : Color.secondary)
+            }
+
+            Button(role: .destructive) {
+                model.clearSyncSettings()
+            } label: {
+                Label("Hapus alamat & token", systemImage: "trash")
+            }
+        } header: {
+            Text("Kirim ke MongoDB")
+        } footer: {
+            Text("Hanya berjalan saat tombol ditekan; tidak ada unggahan otomatis atau background. Endpoint HTTPS milikmu yang menyimpan URI MongoDB—aplikasi hanya menyimpan alamat dan token. Token disimpan di Keychain. Jalur pembanding GPX tidak pernah dikirim.")
         }
     }
 

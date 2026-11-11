@@ -14,8 +14,8 @@ android {
         applicationId 'id.bagas.lerengoffline'
         minSdk 26
         targetSdk 34
-        versionCode 12
-        versionName '2.5.3'
+        versionCode 13
+        versionName '2.5.4'
         buildConfigField 'String', 'UPDATE_MANIFEST_URL', "\"${lerengUpdateUrl}\""
     }
 

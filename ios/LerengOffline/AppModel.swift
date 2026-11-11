@@ -54,6 +54,10 @@ final class AppModel: ObservableObject {
     @Published var isRecording = false
     @Published var statusText = "Siap merekam"
     @Published var exportItem: ExportItem?
+    @Published var syncEndpoint = UserDefaults.standard.string(forKey: MongoSync.endpointKey) ?? ""
+    @Published var syncToken = SyncTokenStore.load()
+    @Published var syncStatus: String?
+    @Published var isSyncing = false
     @Published var alertMessage: String?
     @Published var update: IosUpdateInfo?
     @Published var updateNote: String?
@@ -410,6 +414,95 @@ final class AppModel: ObservableObject {
         let collapsed = text.split(separator: "-").joined(separator: "-")
         let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "proyek" : String(trimmed.prefix(40))
+    }
+
+    // MARK: - Kirim ke MongoDB
+
+    var syncConfigured: Bool {
+        !syncEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !syncToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Menyimpan alamat dan token secara lokal. Token masuk Keychain.
+    @discardableResult
+    func saveSyncSettings() -> Bool {
+        do {
+            let url = try MongoSync.normalizeEndpoint(syncEndpoint)
+            let token = syncToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { throw MongoSync.SyncError.missingToken }
+            UserDefaults.standard.set(url.absoluteString, forKey: MongoSync.endpointKey)
+            SyncTokenStore.save(token)
+            syncEndpoint = url.absoluteString
+            syncToken = token
+            syncStatus = "Pengaturan tersimpan di perangkat ini."
+            return true
+        } catch {
+            syncStatus = error.localizedDescription
+            return false
+        }
+    }
+
+    func clearSyncSettings() {
+        UserDefaults.standard.removeObject(forKey: MongoSync.endpointKey)
+        SyncTokenStore.clear()
+        syncEndpoint = ""
+        syncToken = ""
+        syncStatus = "Alamat dan token dihapus dari perangkat."
+    }
+
+    /// Hanya berjalan saat pengguna menekan tombol dan menyetujui konfirmasi.
+    func sendToMongo() {
+        guard let survey, !isSyncing else { return }
+        guard saveSyncSettings() else { return }
+        let config: MongoSync.Config
+        do {
+            config = MongoSync.Config(endpoint: try MongoSync.normalizeEndpoint(syncEndpoint),
+                                      token: syncToken)
+        } catch {
+            syncStatus = error.localizedDescription
+            return
+        }
+
+        let context = ExportContext(project: survey.name,
+                                    points: points,
+                                    presence: presence,
+                                    groupCode: survey.groupCode,
+                                    participantId: survey.participantId,
+                                    participantAlias: survey.participantAlias,
+                                    appVersion: AppConfig.version)
+        let documents = MongoSync.documents(clientId: MongoSync.clientId(),
+                                            surveyId: survey.id,
+                                            context: context,
+                                            platform: "ios")
+        guard !documents.isEmpty else {
+            syncStatus = "Tidak ada data yang bisa dikirim."
+            return
+        }
+
+        isSyncing = true
+        syncStatus = "Menyiapkan \(documents.count) data…"
+        Task {
+            do {
+                let total = try await MongoSync.send(config: config,
+                                                     surveyId: survey.id,
+                                                     project: survey.name,
+                                                     appVersion: AppConfig.version,
+                                                     documents: documents) { sent, total in
+                    DispatchQueue.main.async { [weak self] in
+                        self?.syncStatus = "Mengirim \(sent) dari \(total) data…"
+                    }
+                }
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncStatus = "Terkirim \(total) data ke MongoDB. Tekan lagi setelah merekam titik baru."
+                }
+            } catch {
+                await MainActor.run {
+                    self.isSyncing = false
+                    self.syncStatus = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: - Pembaruan

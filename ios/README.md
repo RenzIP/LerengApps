@@ -2,7 +2,9 @@
 
 Aplikasi native SwiftUI dengan perilaku yang sama seperti aplikasi Android: merekam jalur
 pendakian secara offline, menandai waypoint, mencatat kehadiran BLE, dan mengekspor data ke
-berkas lokal. Tidak ada unggahan, tidak ada sinkronisasi awan, dan tidak ada konversi datum.
+berkas lokal. Tidak ada unggahan otomatis, tidak ada sinkronisasi awan, dan tidak ada konversi
+datum. Satu-satunya unggahan adalah tombol **Kirim ke MongoDB** yang ditekan sendiri, ke
+endpoint HTTPS milik pengguna; jalur pembanding GPX tidak ikut.
 
 ## Status
 
@@ -37,6 +39,7 @@ BLE hanya dapat diuji di perangkat fisik.
 | `BlePresence.swift` | CoreBluetooth: advertise GATT + baca manufacturer data |
 | `BleGroupCodec.swift` | Format kabel BLE identik dengan Android |
 | `Exporters.swift` | CSV, GPX 1.1, GeoJSON, JSON Lines |
+| `MongoSync.swift` | Kirim manual ke endpoint HTTPS; token di Keychain |
 | `UpdateChecker.swift` | Manifes pembaruan `lereng.ios-update/1` |
 | `AppModel.swift` | Keadaan aplikasi, rekaman, ekspor, identitas |
 | `*View.swift` | Rekam, Analisis, Data, Profil, peta rute, gerbang pembaruan |
@@ -52,7 +55,8 @@ BLE hanya dapat diuji di perangkat fisik.
 - GPX hanya menulis `<ele>` bila semua titik jalur memakai satu referensi elevasi. Referensi
   ditulis di `metadata/extensions/lereng:elevationReference`.
 - GeoJSON memakai skema `lereng.geojson/1`, JSON Lines memakai `lereng.mongo/1` (satu Fitur per
-  baris) sehingga dapat diimpor dengan `tools/geojson_to_mongodb.py`.
+  baris) sehingga dapat diimpor dengan `tools/geojson_to_mongodb.py`. Tombol Kirim ke MongoDB
+  memakai `lereng.mongo/1` yang sama dengan `_id` stabil per record.
 
 ## BLE antar platform
 
