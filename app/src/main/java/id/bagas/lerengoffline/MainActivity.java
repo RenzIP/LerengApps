@@ -84,6 +84,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private static final int REQ_EXPORT_GPX = 108;
     private static final int REQ_IMPORT_GPX = 109;
     private static final int REQ_EXPORT_JSONL = 110;
+    private static final int REQ_IMPORT_REFERENCE_GPX = 111;
     private static final String PREFS_EXPORT = "lereng_export";
     private static final String PREFS_UPDATE = "lereng_update";
     private static final long UPDATE_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L;
@@ -137,6 +138,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private TerrainView terrainView;
     private RouteMapView mapView;
     private TextView mapStatus;
+    private TextView referenceStatus;
+    private Button referenceDeleteButton;
     private TextView terrainStatus, terrain2dTab, terrain3dTab;
     private boolean terrain3d;
     private LocationManager locationManager;
@@ -558,6 +561,32 @@ public final class MainActivity extends Activity implements LocationListener, Se
         mapCard.addView(resetMapButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(44), 0, 6, 0, 0));
         UiKit.addCard(page, mapCard, 0);
+
+        LinearLayout referenceCard = UiKit.card(this);
+        referenceCard.addView(UiKit.cardHeader(this, R.drawable.ic_route, "Jalur pembanding", "GPX"));
+        referenceCard.addView(UiKit.caption(this,
+                "Impor GPX dari aplikasi lain (mis. ekspor Strava) untuk dibandingkan dengan rekaman sendiri. "
+                        + "Garis putus-putus; tidak digabung ke titik rekaman dan tidak ikut diekspor."),
+                UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
+        referenceStatus = UiKit.caption(this, "Belum ada jalur pembanding.");
+        referenceStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        referenceCard.addView(referenceStatus, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 9, 0, 0));
+
+        LinearLayout referenceActions = new LinearLayout(this);
+        referenceActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button referenceImportButton = UiKit.button(this, "Impor GPX", UiKit.STYLE_GHOST, R.drawable.ic_route);
+        referenceDeleteButton = UiKit.button(this, "Hapus", UiKit.STYLE_GHOST, R.drawable.ic_trash);
+        referenceImportButton.setOnClickListener(v -> importReferenceGpx());
+        referenceDeleteButton.setOnClickListener(v -> confirmDeleteReferenceTrack());
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        importParams.rightMargin = dp(8);
+        referenceActions.addView(referenceImportButton, importParams);
+        referenceActions.addView(referenceDeleteButton, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        referenceCard.addView(referenceActions, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
+        UiKit.addCard(page, referenceCard, 12);
 
         LinearLayout profileCard = UiKit.card(this);
         profileCard.addView(UiKit.cardHeader(this, R.drawable.ic_chart, "Profil elevasi", "SATU JALUR"));
@@ -1622,6 +1651,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         updatePermissionState();
         updateRecordingUi(trackCount);
         if (mapView != null) mapView.setRoute(points, selectedSurveyId);
+        refreshReferenceTrack();
         refreshRouteProfile(points, selectedSurveyId);
         refreshTerrain(points, selectedSurveyId);
     }
@@ -2082,6 +2112,113 @@ public final class MainActivity extends Activity implements LocationListener, Se
         startActivityForResult(i, REQ_IMPORT_GPX);
     }
 
+    // ---------------------------------------------------------------- jalur pembanding
+
+    private void refreshReferenceTrack() {
+        if (mapView == null) return;
+        SurveyDatabase.ReferenceTrack track = database.getReferenceTrack(selectedSurveyId);
+        List<double[]> coordinates = track == null
+                ? new ArrayList<>() : database.getReferenceCoordinates(selectedSurveyId);
+        mapView.setReferenceTrack(coordinates, track == null ? "" : track.name);
+        if (referenceStatus != null) {
+            referenceStatus.setText(track == null
+                    ? "Belum ada jalur pembanding."
+                    : track.name + " • " + track.pointCount + " titik • diimpor "
+                        + java.time.format.DateTimeFormatter.ofPattern("dd MMM HH:mm", Locale.getDefault())
+                            .withZone(java.time.ZoneId.systemDefault())
+                            .format(Instant.ofEpochMilli(track.importedAt)));
+        }
+        if (referenceDeleteButton != null) referenceDeleteButton.setEnabled(track != null);
+    }
+
+    private void importReferenceGpx() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/gpx+xml", "application/xml", "text/xml", "text/plain", "application/octet-stream"});
+        startActivityForResult(i, REQ_IMPORT_REFERENCE_GPX);
+    }
+
+    private String referenceDocumentName(Uri uri) {
+        String name = "Jalur pembanding";
+        try (Cursor c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String value = c.getString(0);
+                if (value != null && !value.trim().isEmpty())
+                    name = value.trim().replaceFirst("(?i)\\.gpx$", "");
+            }
+        } catch (Exception ignored) {}
+        return name;
+    }
+
+    private void prepareReferenceGpxImport(Uri uri) {
+        final long targetSurveyId = selectedSurveyId;
+        final String name = referenceDocumentName(uri);
+        Toast.makeText(this, "Membaca GPX pembanding…", Toast.LENGTH_SHORT).show();
+        profileExecutor.execute(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                final GpxCodec.Result result = GpxCodec.parse(input);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    final List<SurveyDatabase.ReferencePoint> points = new ArrayList<>();
+                    for (GpxCodec.ParsedPoint parsed : result.points) {
+                        if (parsed.waypoint) continue;
+                        points.add(new SurveyDatabase.ReferencePoint(parsed.latitude, parsed.longitude,
+                                parsed.elevation, parsed.time));
+                    }
+                    if (points.isEmpty()) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("GPX tanpa titik track")
+                                .setMessage("File terbaca, tetapi tidak ada <trkpt> dengan koordinat valid."
+                                        + (result.skipped > 0 ? "\n\n" + result.skipped + " baris dilewati karena koordinat tidak valid." : ""))
+                                .setPositiveButton("Tutup", null).show();
+                        return;
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("Pakai sebagai jalur pembanding?")
+                            .setMessage(points.size() + " titik track dibaca"
+                                    + (result.creator.isEmpty() ? "" : " (dibuat oleh " + result.creator + ")")
+                                    + ".\n\nJalur ini disimpan terpisah: hanya digambar putus-putus di peta, "
+                                    + "tidak digabung ke titik rekaman, dan tidak ikut diekspor. Elevasi file diabaikan "
+                                    + "karena pembanding hanya memakai geometri.\n\nJalur pembanding sebelumnya pada proyek ini akan diganti.")
+                            .setNegativeButton("Batal", null)
+                            .setPositiveButton("Pakai", (dialog, which) -> {
+                                long id = database.replaceReferenceTrack(targetSurveyId, name, result.creator, points);
+                                if (id < 0) {
+                                    Toast.makeText(this, "Jalur pembanding gagal disimpan.", Toast.LENGTH_LONG).show();
+                                } else {
+                                    Toast.makeText(this, "Jalur pembanding tersimpan (" + points.size() + " titik).", Toast.LENGTH_LONG).show();
+                                    refreshAll();
+                                }
+                            })
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    new AlertDialog.Builder(this)
+                            .setTitle("Impor GPX pembanding gagal")
+                            .setMessage("Pilih file GPX 1.1 yang valid (akar <gpx>). Tidak ada data yang diubah.\n\n" + safeMessage(e))
+                            .setPositiveButton("Tutup", null).show();
+                });
+            }
+        });
+    }
+
+    private void confirmDeleteReferenceTrack() {
+        new AlertDialog.Builder(this)
+                .setTitle("Hapus jalur pembanding?")
+                .setMessage("Hanya jalur pembanding yang dihapus. Titik rekaman aplikasi tidak terpengaruh.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Hapus", (dialog, which) -> {
+                    database.deleteReferenceTrack(selectedSurveyId);
+                    Toast.makeText(this, "Jalur pembanding dihapus.", Toast.LENGTH_SHORT).show();
+                    refreshAll();
+                })
+                .show();
+    }
+
     /** Reads the file off the UI thread, then asks for the datum before writing anything. */
     private void prepareGpxImport(Uri uri) {
         Toast.makeText(this, "Membaca file GPX…", Toast.LENGTH_SHORT).show();
@@ -2324,6 +2461,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
             }
         } else if (requestCode == REQ_IMPORT_GPX) {
             prepareGpxImport(uri);
+        } else if (requestCode == REQ_IMPORT_REFERENCE_GPX) {
+            prepareReferenceGpxImport(uri);
         } else if (requestCode == REQ_EXPORT_CSV || requestCode == REQ_EXPORT_GEOJSON
                 || requestCode == REQ_EXPORT_GPX || requestCode == REQ_EXPORT_JSONL) {
             try {

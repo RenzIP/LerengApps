@@ -65,6 +65,51 @@ struct Presence: Identifiable, Equatable {
     var groupCode: String
 }
 
+// MARK: - Jalur pembanding
+
+/// Satu titik dari GPX pihak lain. Hanya geometri yang dipakai peta; elevasi file disimpan
+/// sebagai keterangan dan tidak pernah dicampur ke elevasi titik rekaman.
+struct ReferencePoint: Equatable {
+    var lat: Double
+    var lon: Double
+    var elevation: Double?
+    var time: Int64?
+
+    var hasValidCoordinate: Bool {
+        lat.isFinite && lon.isFinite && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+    }
+}
+
+struct ReferenceTrack: Identifiable, Equatable {
+    var id: Int64
+    var surveyId: Int64
+    var name: String
+    var source: String
+    var importedAt: Int64
+    var pointCount: Int
+}
+
+/// Impor yang sudah dibaca tetapi belum disimpan; pengguna mengonfirmasi lebih dulu.
+struct PendingReferenceImport: Identifiable {
+    let id = UUID()
+    let name: String
+    let source: String
+    let points: [ReferencePoint]
+    let skipped: Int
+
+    var message: String {
+        var text = "\(points.count) titik track dibaca"
+        if !source.isEmpty { text += " (dibuat oleh \(source))" }
+        text += "."
+        if skipped > 0 { text += " \(skipped) baris dilewati karena koordinat tidak valid." }
+        text += "\n\nJalur ini disimpan terpisah: hanya digambar putus-putus di peta, "
+        text += "tidak digabung ke titik rekaman, dan tidak ikut diekspor. Elevasi file diabaikan "
+        text += "karena pembanding hanya memakai geometri.\n\n"
+        text += "Jalur pembanding sebelumnya pada proyek ini akan diganti."
+        return text
+    }
+}
+
 // MARK: - Referensi elevasi
 
 /// Elevasi tidak pernah dikonversi. Label hanya keterangan asal-usul.

@@ -89,4 +89,64 @@ final class DatabaseTests: XCTestCase {
         database.deletePresence(surveyId: surveyId)
         XCTAssertTrue(database.presence(surveyId: surveyId).isEmpty)
     }
+
+    func testReferenceTrackReplaceReadDelete() {
+        let surveyId = database.ensureDefaultSurvey()
+        let points = [
+            ReferencePoint(lat: -7.5, lon: 110.4, elevation: 1500, time: 1_000),
+            ReferencePoint(lat: -7.501, lon: 110.401, elevation: nil, time: nil)
+        ]
+        let firstId = database.replaceReferenceTrack(surveyId: surveyId, name: "Strava",
+                                                      source: "StravaGPX", points: points)
+        XCTAssertGreaterThan(firstId, 0)
+
+        let track = database.referenceTrack(surveyId: surveyId)
+        XCTAssertEqual(track?.name, "Strava")
+        XCTAssertEqual(track?.source, "StravaGPX")
+        XCTAssertEqual(track?.pointCount, 2)
+
+        let stored = database.referencePoints(surveyId: surveyId)
+        XCTAssertEqual(stored.count, 2)
+        XCTAssertEqual(stored[0].lat, -7.5, accuracy: 1e-9)
+        XCTAssertEqual(stored[0].lon, 110.4, accuracy: 1e-9)
+        XCTAssertEqual(stored[0].elevation ?? 0, 1500, accuracy: 0.001)
+        XCTAssertEqual(stored[0].time, 1_000)
+        XCTAssertNil(stored[1].elevation)
+        XCTAssertNil(stored[1].time)
+
+        // Impor ulang mengganti jalur sebelumnya, bukan menumpuk.
+        let secondId = database.replaceReferenceTrack(
+            surveyId: surveyId, name: "Garmin", source: "",
+            points: [ReferencePoint(lat: -7.6, lon: 110.5, elevation: nil, time: nil)])
+        XCTAssertGreaterThan(secondId, 0)
+        XCTAssertEqual(database.referenceTrack(surveyId: surveyId)?.name, "Garmin")
+        XCTAssertEqual(database.referencePoints(surveyId: surveyId).count, 1)
+
+        database.deleteReferenceTrack(surveyId: surveyId)
+        XCTAssertNil(database.referenceTrack(surveyId: surveyId))
+        XCTAssertTrue(database.referencePoints(surveyId: surveyId).isEmpty)
+    }
+
+    func testReferenceTrackRejectsEmptyWithoutDroppingPrevious() {
+        let surveyId = database.ensureDefaultSurvey()
+        _ = database.replaceReferenceTrack(
+            surveyId: surveyId, name: "Strava", source: "StravaGPX",
+            points: [ReferencePoint(lat: -7.5, lon: 110.4, elevation: nil, time: nil)])
+
+        let rejected = database.replaceReferenceTrack(surveyId: surveyId, name: "Kosong",
+                                                      source: "", points: [])
+        XCTAssertEqual(rejected, -1)
+        XCTAssertEqual(database.referenceTrack(surveyId: surveyId)?.name, "Strava")
+        XCTAssertEqual(database.referencePoints(surveyId: surveyId).count, 1)
+    }
+
+    func testReferenceTrackCascadesWithSurveyDelete() {
+        let surveyId = database.ensureDefaultSurvey()
+        _ = database.replaceReferenceTrack(
+            surveyId: surveyId, name: "Strava", source: "StravaGPX",
+            points: [ReferencePoint(lat: -7.5, lon: 110.4, elevation: nil, time: nil)])
+        database.deleteSurvey(surveyId)
+        XCTAssertNil(database.referenceTrack(surveyId: surveyId))
+        XCTAssertTrue(database.referencePoints(surveyId: surveyId).isEmpty)
+    }
 }

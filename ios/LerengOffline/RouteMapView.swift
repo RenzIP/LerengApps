@@ -3,8 +3,12 @@ import MapKit
 import UIKit
 
 /// Peta rute tanpa layanan pihak ketiga. Ubin peta berasal dari kerangka peta sistem.
+/// Jalur pembanding dari GPX pihak lain digambar putus-putus dan tidak pernah digabung
+/// ke titik rekaman.
 struct RouteMapView: UIViewRepresentable {
     var points: [TrackPoint]
+    var reference: [ReferencePoint] = []
+    var referenceLabel: String = ""
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -20,9 +24,13 @@ struct RouteMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ mapView: MKMapView, context: Context) {
-        let signature = "\(points.count)|\(points.last?.id ?? -1)"
+        let signature = "\(points.count)|\(points.last?.id ?? -1)|\(reference.count)|\(reference.first?.lat ?? 0)|\(referenceLabel)"
         guard context.coordinator.signature != signature else { return }
         context.coordinator.signature = signature
+
+        mapView.accessibilityLabel = reference.isEmpty
+            ? "Peta jalur offline"
+            : "Peta jalur offline dengan jalur pembanding \(referenceLabel)"
 
         mapView.removeOverlays(mapView.overlays)
         mapView.removeAnnotations(mapView.annotations)
@@ -40,6 +48,27 @@ struct RouteMapView: UIViewRepresentable {
             mapView.addOverlay(polyline)
         }
 
+        // Garis pembanding dipecah saat ada lompatan besar supaya tidak menarik garis lurus
+        // melintasi lembah ketika file sumber punya jeda sinyal.
+        var segment: [CLLocationCoordinate2D] = []
+        var previous: ReferencePoint?
+        func flushSegment() {
+            guard segment.count >= 2 else { segment.removeAll(); return }
+            var line = segment
+            mapView.addOverlay(MKGeodesicPolyline(coordinates: &line, count: line.count))
+            segment.removeAll()
+        }
+        for point in reference where point.hasValidCoordinate {
+            if let previous,
+               Geo.distanceMeters(lat1: previous.lat, lon1: previous.lon,
+                                  lat2: point.lat, lon2: point.lon) > 2000 {
+                flushSegment()
+            }
+            segment.append(CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon))
+            previous = point
+        }
+        flushSegment()
+
         for waypoint in points where waypoint.isWaypoint && waypoint.hasValidCoordinate {
             let annotation = MKPointAnnotation()
             annotation.coordinate = CLLocationCoordinate2D(latitude: waypoint.lat, longitude: waypoint.lon)
@@ -50,8 +79,11 @@ struct RouteMapView: UIViewRepresentable {
             mapView.addAnnotation(annotation)
         }
 
-        guard let first = coordinates.first else { return }
-        mapView.setRegion(MKCoordinateRegion(center: first,
+        let focus = coordinates.first
+            ?? reference.first(where: { $0.hasValidCoordinate })
+                .map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
+        guard let focus else { return }
+        mapView.setRegion(MKCoordinateRegion(center: focus,
                                              latitudinalMeters: 1200,
                                              longitudinalMeters: 1200),
                           animated: false)
@@ -75,8 +107,15 @@ struct RouteMapView: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let renderer = MKPolylineRenderer(polyline: polyline)
-            renderer.strokeColor = UIColor(Theme.accent)
-            renderer.lineWidth = 4
+            if polyline is MKGeodesicPolyline {
+                renderer.strokeColor = UIColor(Theme.warning)
+                renderer.lineWidth = 2.5
+                renderer.lineDashPattern = [NSNumber(value: 6), NSNumber(value: 5)]
+                renderer.alpha = 0.9
+            } else {
+                renderer.strokeColor = UIColor(Theme.accent)
+                renderer.lineWidth = 4
+            }
             renderer.lineCap = .round
             renderer.lineJoin = .round
             return renderer

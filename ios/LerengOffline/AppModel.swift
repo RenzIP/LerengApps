@@ -48,6 +48,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var survey: Survey?
     @Published private(set) var points: [TrackPoint] = []
     @Published private(set) var presence: [Presence] = []
+    @Published private(set) var referenceTrack: ReferenceTrack?
+    @Published private(set) var referencePoints: [ReferencePoint] = []
+    @Published var pendingReferenceImport: PendingReferenceImport?
     @Published var isRecording = false
     @Published var statusText = "Siap merekam"
     @Published var exportItem: ExportItem?
@@ -61,6 +64,9 @@ final class AppModel: ObservableObject {
     private var lastAutoCheck: Date?
 
     private let autoCheckInterval: TimeInterval = 6 * 60 * 60
+
+    /// Titik dengan akurasi horizontal di atas nilai ini tidak disimpan.
+    static let maxHorizontalAccuracyMeters = 30.0
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -104,10 +110,24 @@ final class AppModel: ObservableObject {
         guard let survey else {
             points = []
             presence = []
+            referenceTrack = nil
+            referencePoints = []
             return
         }
         points = database.points(surveyId: survey.id)
         presence = database.presence(surveyId: survey.id)
+        refreshReference()
+    }
+
+    private func refreshReference() {
+        guard let survey else {
+            referenceTrack = nil
+            referencePoints = []
+            return
+        }
+        let track = database.referenceTrack(surveyId: survey.id)
+        referenceTrack = track
+        referencePoints = track == nil ? [] : database.referencePoints(surveyId: survey.id)
     }
 
     // MARK: - Rekaman
@@ -144,7 +164,13 @@ final class AppModel: ObservableObject {
 
     private func handle(_ location: CLLocation) {
         guard isRecording, let survey else { return }
-        guard location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 100 else { return }
+        guard location.horizontalAccuracy >= 0 else { return }
+        if location.horizontalAccuracy > Self.maxHorizontalAccuracyMeters {
+            // Titik buruk tidak disimpan supaya jalur tidak melompat; fix berikutnya tetap dicoba.
+            statusText = String(format: "Titik dilewati: akurasi ±%.0f m di atas batas %.0f m",
+                                location.horizontalAccuracy, Self.maxHorizontalAccuracyMeters)
+            return
+        }
         let time = Int64(location.timestamp.timeIntervalSince1970 * 1000)
         guard time > lastPointTime else { return }
         lastPointTime = time
@@ -279,6 +305,57 @@ final class AppModel: ObservableObject {
         database.deletePresence(surveyId: survey.id)
         lastPointTime = 0
         refresh()
+    }
+
+    // MARK: - Jalur pembanding
+
+    /// Membaca GPX pihak lain (mis. ekspor Strava) tanpa OAuth dan tanpa jaringan.
+    /// Hasilnya belum disimpan; pengguna mengonfirmasi lewat `confirmReferenceImport()`.
+    func importReferenceGPX(from url: URL) {
+        do {
+            let result = try GpxReferenceParser.parse(url: url)
+            guard !result.points.isEmpty else {
+                alertMessage = "GPX terbaca, tetapi tidak ada <trkpt> dengan koordinat valid."
+                    + (result.skipped > 0 ? "\n\n\(result.skipped) baris dilewati karena koordinat tidak valid." : "")
+                return
+            }
+            pendingReferenceImport = PendingReferenceImport(
+                name: url.deletingPathExtension().lastPathComponent,
+                source: result.creator,
+                points: result.points,
+                skipped: result.skipped)
+        } catch {
+            alertMessage = "Impor GPX pembanding gagal. Pilih file GPX 1.1 yang valid (akar <gpx>). "
+                + "Tidak ada data yang diubah.\n\n\(error.localizedDescription)"
+        }
+    }
+
+    func confirmReferenceImport() {
+        guard let pending = pendingReferenceImport, let survey else {
+            pendingReferenceImport = nil
+            return
+        }
+        let id = database.replaceReferenceTrack(surveyId: survey.id,
+                                                name: pending.name,
+                                                source: pending.source,
+                                                points: pending.points)
+        pendingReferenceImport = nil
+        guard id >= 0 else {
+            alertMessage = "Jalur pembanding gagal disimpan."
+            return
+        }
+        refreshReference()
+        alertMessage = "Jalur pembanding tersimpan (\(pending.points.count) titik)."
+    }
+
+    func cancelReferenceImport() {
+        pendingReferenceImport = nil
+    }
+
+    func deleteReferenceTrack() {
+        guard let survey else { return }
+        database.deleteReferenceTrack(surveyId: survey.id)
+        refreshReference()
     }
 
     // MARK: - Ekspor

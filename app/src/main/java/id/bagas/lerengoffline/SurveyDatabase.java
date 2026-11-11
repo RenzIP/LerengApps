@@ -13,7 +13,7 @@ import java.util.Locale;
 
 public final class SurveyDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "lereng_offline.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
 
     public static final class Survey {
         public final long id;
@@ -120,6 +120,7 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE points (_id INTEGER PRIMARY KEY AUTOINCREMENT, survey_id INTEGER NOT NULL, time_ms INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, gps_alt REAL, h_acc REAL, v_acc REAL, pressure_hpa REAL, baro_rel_alt REAL, source TEXT NOT NULL, label TEXT, participant_id TEXT, participant_alias TEXT, group_code TEXT, is_waypoint INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(survey_id) REFERENCES surveys(_id) ON DELETE CASCADE)");
         db.execSQL("CREATE INDEX points_by_survey_time ON points(survey_id, time_ms)");
         createPresenceTable(db);
+        createReferenceTables(db);
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
@@ -137,6 +138,7 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
             createElevationTables(db);
             db.execSQL("ALTER TABLE surveys ADD COLUMN elevation_dataset_id INTEGER");
         }
+        if (oldVersion < 4) createReferenceTables(db);
     }
 
     private void createElevationTables(SQLiteDatabase db) {
@@ -148,6 +150,107 @@ public final class SurveyDatabase extends SQLiteOpenHelper {
     private void createPresenceTable(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS presence (_id INTEGER PRIMARY KEY AUTOINCREMENT, survey_id INTEGER NOT NULL, time_ms INTEGER NOT NULL, observer_participant_id TEXT NOT NULL, seen_participant_id TEXT NOT NULL, group_code TEXT NOT NULL, bucket_30s INTEGER NOT NULL, FOREIGN KEY(survey_id) REFERENCES surveys(_id) ON DELETE CASCADE, UNIQUE(survey_id, observer_participant_id, seen_participant_id, bucket_30s))");
         db.execSQL("CREATE INDEX IF NOT EXISTS presence_by_survey_time ON presence(survey_id, time_ms)");
+    }
+
+    /**
+     * Jalur pembanding (mis. hasil ekspor GPX dari aplikasi lain) disimpan terpisah supaya tidak
+     * pernah tercampur dengan titik yang direkam aplikasi ini.
+     */
+    private void createReferenceTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS reference_tracks (_id INTEGER PRIMARY KEY AUTOINCREMENT, survey_id INTEGER NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL, imported_at INTEGER NOT NULL, point_count INTEGER NOT NULL, FOREIGN KEY(survey_id) REFERENCES surveys(_id) ON DELETE CASCADE)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS reference_points (_id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER NOT NULL, seq INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, ele REAL, time_ms INTEGER, FOREIGN KEY(track_id) REFERENCES reference_tracks(_id) ON DELETE CASCADE)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS reference_points_by_track ON reference_points(track_id, seq)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS reference_tracks_by_survey ON reference_tracks(survey_id)");
+    }
+
+    public static final class ReferencePoint {
+        public final double lat;
+        public final double lon;
+        public final Double elevation;
+        public final Long time;
+        public ReferencePoint(double lat, double lon, Double elevation, Long time) {
+            this.lat = lat; this.lon = lon; this.elevation = elevation; this.time = time;
+        }
+    }
+
+    public static final class ReferenceTrack {
+        public final long id;
+        public final String name;
+        public final String source;
+        public final long importedAt;
+        public final int pointCount;
+        ReferenceTrack(long id, String name, String source, long importedAt, int pointCount) {
+            this.id = id; this.name = name; this.source = source;
+            this.importedAt = importedAt; this.pointCount = pointCount;
+        }
+    }
+
+    /** One reference track per project: importing again replaces the previous comparison file. */
+    public synchronized long replaceReferenceTrack(long surveyId, String name, String source,
+                                                   List<ReferencePoint> points) {
+        if (points == null || points.isEmpty()) return -1;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.delete("reference_tracks", "survey_id=?", new String[]{String.valueOf(surveyId)});
+            ContentValues track = new ContentValues();
+            track.put("survey_id", surveyId);
+            track.put("name", safe(name).trim().isEmpty() ? "Jalur pembanding" : safe(name).trim());
+            track.put("source", safe(source));
+            track.put("imported_at", System.currentTimeMillis());
+            track.put("point_count", points.size());
+            long trackId = db.insertOrThrow("reference_tracks", null, track);
+            android.database.sqlite.SQLiteStatement insert = db.compileStatement(
+                    "INSERT INTO reference_points (track_id, seq, lat, lon, ele, time_ms) VALUES (?, ?, ?, ?, ?, ?)");
+            try {
+                int seq = 0;
+                for (ReferencePoint point : points) {
+                    if (point == null) continue;
+                    insert.bindLong(1, trackId);
+                    insert.bindLong(2, seq++);
+                    insert.bindDouble(3, point.lat);
+                    insert.bindDouble(4, point.lon);
+                    if (point.elevation == null) insert.bindNull(5);
+                    else insert.bindDouble(5, point.elevation);
+                    if (point.time == null) insert.bindNull(6);
+                    else insert.bindLong(6, point.time);
+                    insert.executeInsert();
+                }
+            } finally {
+                insert.close();
+            }
+            db.setTransactionSuccessful();
+            return trackId;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public synchronized ReferenceTrack getReferenceTrack(long surveyId) {
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT _id, name, source, imported_at, point_count FROM reference_tracks WHERE survey_id=? ORDER BY _id DESC LIMIT 1",
+                new String[]{String.valueOf(surveyId)})) {
+            return c.moveToFirst()
+                    ? new ReferenceTrack(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3), c.getInt(4))
+                    : null;
+        }
+    }
+
+    /** Coordinates in file order; only lat/lon, because the map draws geometry, not elevation. */
+    public synchronized List<double[]> getReferenceCoordinates(long surveyId) {
+        List<double[]> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT p.lat, p.lon FROM reference_points p JOIN reference_tracks t ON t._id = p.track_id "
+                        + "WHERE t.survey_id=? ORDER BY p.track_id DESC, p.seq ASC",
+                new String[]{String.valueOf(surveyId)})) {
+            while (c.moveToNext()) result.add(new double[]{c.getDouble(0), c.getDouble(1)});
+        }
+        return result;
+    }
+
+    public synchronized int deleteReferenceTrack(long surveyId) {
+        return getWritableDatabase().delete("reference_tracks", "survey_id=?",
+                new String[]{String.valueOf(surveyId)});
     }
 
     public synchronized long ensureDefaultSurvey() {

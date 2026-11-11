@@ -17,8 +17,10 @@ final class LocationRecorder: NSObject, ObservableObject, CLLocationManagerDeleg
         super.init()
         authorizationStatus = manager.authorizationStatus
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 3
+        // Best-for-navigation meminta GNSS bekerja pada presisi tertinggi, sama seperti aplikasi
+        // olahraga populer. Baterai lebih cepat terkuras; rekaman lapangan tetap prioritas.
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        manager.distanceFilter = 2
         manager.pausesLocationUpdatesAutomatically = false
         manager.activityType = .fitness
     }

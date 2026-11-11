@@ -1,4 +1,4 @@
-# Lereng Offline 2.5.2
+# Lereng Offline 2.5.3
 
 Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga, unduhan dataset otomatis, atau unggahan track.
 
@@ -36,7 +36,8 @@ Profil tetap merupakan perkiraan dari dataset yang kamu sediakan, bukan survei r
 
 ## Perekaman dan rombongan
 
-- Lokasi Android berbasis jaringan dan GPS/GNSS diminta bersamaan bila tersedia. Jika internet tervalidasi, provider jaringan sistem dapat membantu memberi fix. Saat internet putus, fix jaringan lama dibuang dan GNSS tetap diminta; perekaman tidak dijeda. Ketersediaan tetap bergantung perangkat dan layanan lokasi Android.
+- Lokasi Android memakai **Fused Location Provider** (Google Play Services) dengan prioritas akurasi tinggi, interval 5 detik, dan fallback otomatis ke `LocationManager` bila Play Services tidak tersedia. iOS memakai Core Location dengan `kCLLocationAccuracyBestForNavigation` dan filter jarak 2 m. Fused menggabungkan GNSS, Wi-Fi, dan sel seperti aplikasi olahraga populer; lokasi melewati layanan Google, tetapi aplikasi ini tetap tidak mengunggah track. Di luar jangkauan jaringan, GNSS tetap menjadi sumber utama.
+- Titik dengan akurasi horizontal di atas **30 m tidak disimpan**; status perekaman menampilkan bahwa titik dilewati. Tujuannya agar jalur tidak melompat saat sinyal buruk. Konsekuensinya, di lembah sempit atau bawah kanopi rapat bisa ada jeda antar titik.
 - Track, waktu, akurasi, elevasi yang tersedia, dan tekanan barometer opsional disimpan lokal. Elevasi Android `Location` memakai ellipsoid WGS84 dan bukan otomatis tinggi permukaan laut.
 - Untuk rombongan, gunakan kode outing sama pada setiap ponsel, rekam tiap peserta, lalu gabungkan CSV secara manual setelah perjalanan.
 - BLE opsional mendukung Android↔Android, iPhone↔iPhone, dan Android↔iPhone. Android menyiarkan Service Data berisi tag hash outing + ID peserta samaran; iPhone dapat membacanya. Untuk iPhone, Android v2.3 menemukan service UUID lalu membaca characteristic GATT read-only. Aplikasi hanya mencatat ID dan waktu event; tidak menyimpan alamat/RSSI dan tidak menghitung jarak, posisi, elevasi, atau triangulasi.
@@ -45,6 +46,18 @@ Profil tetap merupakan perkiraan dari dataset yang kamu sediakan, bukan survei r
 - Profil jalur mengikuti track peserta dengan titik terbanyak. Tanpa dataset lokal aktif, elevasi mentah peserta hanya digabung bila dekat secara lokasi/waktu **dan datumnya sejenis**; Android WGS84 ellipsoid dipisahkan dari iOS Core Location mean sea level. Dataset lokal yang mencakup seluruh jalur dapat menjadi acuan bersama. Ambang 3 m membantu mengurangi sebagian noise, bukan menjamin akurasi.
 
 Saat provider Network Android digunakan, layanan sistem/vendor dapat memproses konektivitas/lokasi di luar aplikasi. Aplikasi ini sendiri tidak mengirim track atau meminta elevation API. Jika perangkat tak mendapat fix jaringan maupun GNSS, aplikasi tak dapat menciptakan lokasi.
+
+## Jalur pembanding dari GPX pihak lain
+
+Tab **Analisis** menyediakan kartu **Jalur pembanding (GPX)**. Kamu dapat mengekspor aktivitas dari aplikasi lain (misalnya Strava: buka aktivitas → menu → *Export GPX*), lalu mengimpor file itu ke Lereng Offline. Tidak ada OAuth, API key, atau koneksi jaringan; file dibaca langsung dari penyimpanan perangkat.
+
+- Jalur pembanding digambar **putus-putus amber** di peta dan tidak pernah digabung ke titik rekaman.
+- Datanya disimpan di tabel terpisah (`reference_tracks` / `reference_points`) dan **tidak ikut diekspor** sebagai hasil rekaman aplikasi ini.
+- Hanya geometri `<trkpt>` yang dipakai; `<wpt>` dan elevasi file diabaikan agar datum tidak tercampur.
+- Satu proyek menyimpan satu jalur pembanding; impor ulang menggantinya.
+- Batas file 16 MB dan DOCTYPE ditolak. Koordinat tidak valid dilewati dan dilaporkan.
+
+Strava tidak menyediakan API posisi waktu nyata; yang tersedia hanya data aktivitas yang sudah selesai. Karena itu impor GPX adalah cara yang jujur untuk membandingkan hasil, bukan menyalin GPS Strava secara langsung.
 
 ## Ekspor, GPX, dan MongoDB
 
@@ -80,8 +93,8 @@ melakukan `GET` HTTPS ke manifes itu (±7 detik timeout, maksimal 64 KB) dan mem
 ```powershell
 # hasilkan manifes dari APK yang akan dirilis
 python tools\publish_update.py --apk app\build\outputs\apk\debug\app-debug.apk `
-  --version-code 11 --version-name 2.5.2 `
-  --apk-url https://contoh.example/lereng/LerengOffline-2.5.2.apk --mandatory
+  --version-code 12 --version-name 2.5.3 `
+  --apk-url https://contoh.example/lereng/LerengOffline-2.5.3.apk --mandatory
 
 # bangun APK yang menunjuk ke manifes tersebut
 .\gradlew.bat assembleDebug -PlerengUpdateUrl="https://contoh.example/lereng/update.json"
@@ -97,7 +110,7 @@ Rilis proyek ini memakai GitHub:
 
 ## Instalasi dan build
 
-Pasang `LerengOffline-2.5.2.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
+Pasang `LerengOffline-2.5.3.apk` pada Android 8.0 atau lebih baru. Ini APK debug untuk sideload/pengujian. Source dapat dibangun dengan JDK 17+ dan Android SDK platform/build-tools 35:
 
 ```bash
 ./gradlew assembleDebug

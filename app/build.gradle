@@ -14,8 +14,8 @@ android {
         applicationId 'id.bagas.lerengoffline'
         minSdk 26
         targetSdk 34
-        versionCode 11
-        versionName '2.5.2'
+        versionCode 12
+        versionName '2.5.3'
         buildConfigField 'String', 'UPDATE_MANIFEST_URL', "\"${lerengUpdateUrl}\""
     }
 
@@ -36,6 +36,9 @@ android {
 }
 
 dependencies {
+    // Fused Location Provider: menggabungkan GNSS + Wi-Fi + sel seperti aplikasi olahraga populer.
+    // Ada fallback LocationManager bila perangkat tidak punya Google Play Services.
+    implementation 'com.google.android.gms:play-services-location:21.4.0'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
 }

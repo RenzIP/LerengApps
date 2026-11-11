@@ -109,7 +109,28 @@ final class Database {
             UNIQUE(survey_id, observer_participant_id, seen_participant_id, bucket_30s)
         );
         CREATE INDEX IF NOT EXISTS presence_by_survey_time ON presence(survey_id, time_ms);
-        PRAGMA user_version = 3;
+        CREATE TABLE IF NOT EXISTS reference_tracks (
+            _id INTEGER PRIMARY KEY AUTOINCREMENT,
+            survey_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            imported_at INTEGER NOT NULL,
+            point_count INTEGER NOT NULL,
+            FOREIGN KEY(survey_id) REFERENCES surveys(_id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS reference_points (
+            _id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            ele REAL,
+            time_ms INTEGER,
+            FOREIGN KEY(track_id) REFERENCES reference_tracks(_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS reference_points_by_track ON reference_points(track_id, seq);
+        CREATE INDEX IF NOT EXISTS reference_tracks_by_survey ON reference_tracks(survey_id);
+        PRAGMA user_version = 4;
         """)
     }
 
@@ -281,6 +302,109 @@ final class Database {
 
     func deletePresence(surveyId: Int64) {
         let statement = prepare("DELETE FROM presence WHERE survey_id = ?", [.int(surveyId)])
+        defer { sqlite3_finalize(statement) }
+        _ = sqlite3_step(statement)
+    }
+
+    // MARK: - Jalur pembanding
+
+    /// Satu jalur pembanding per proyek: impor ulang mengganti jalur sebelumnya.
+    /// Data ini terpisah dari `points` sehingga tidak pernah ikut ekspor rekaman.
+    @discardableResult
+    func replaceReferenceTrack(surveyId: Int64, name: String, source: String,
+                               points: [ReferencePoint]) -> Int64 {
+        let usable = points.filter { $0.hasValidCoordinate }
+        guard !usable.isEmpty else { return -1 }
+        guard execute("BEGIN IMMEDIATE") else { return -1 }
+
+        let delete = prepare("DELETE FROM reference_tracks WHERE survey_id = ?", [.int(surveyId)])
+        sqlite3_step(delete)
+        sqlite3_finalize(delete)
+
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let insertTrack = prepare("""
+        INSERT INTO reference_tracks (survey_id, name, source, imported_at, point_count)
+        VALUES (?, ?, ?, ?, ?)
+        """, [.int(surveyId),
+              .text(cleanName.isEmpty ? "Jalur pembanding" : cleanName),
+              .text(source),
+              .int(Int64(Date().timeIntervalSince1970 * 1000)),
+              .int(Int64(usable.count))])
+        guard sqlite3_step(insertTrack) == SQLITE_DONE else {
+            sqlite3_finalize(insertTrack)
+            _ = execute("ROLLBACK")
+            return -1
+        }
+        sqlite3_finalize(insertTrack)
+        let trackId = sqlite3_last_insert_rowid(handle)
+
+        let insertPoint = prepare("""
+        INSERT INTO reference_points (track_id, seq, lat, lon, ele, time_ms)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """)
+        guard insertPoint != nil else {
+            _ = execute("ROLLBACK")
+            return -1
+        }
+        var failed = false
+        for (index, point) in usable.enumerated() {
+            sqlite3_reset(insertPoint)
+            sqlite3_clear_bindings(insertPoint)
+            sqlite3_bind_int64(insertPoint, 1, trackId)
+            sqlite3_bind_int64(insertPoint, 2, Int64(index))
+            sqlite3_bind_double(insertPoint, 3, point.lat)
+            sqlite3_bind_double(insertPoint, 4, point.lon)
+            if let elevation = point.elevation { sqlite3_bind_double(insertPoint, 5, elevation) }
+            else { sqlite3_bind_null(insertPoint, 5) }
+            if let time = point.time { sqlite3_bind_int64(insertPoint, 6, time) }
+            else { sqlite3_bind_null(insertPoint, 6) }
+            if sqlite3_step(insertPoint) != SQLITE_DONE { failed = true; break }
+        }
+        sqlite3_finalize(insertPoint)
+        guard !failed, execute("COMMIT") else {
+            _ = execute("ROLLBACK")
+            return -1
+        }
+        return trackId
+    }
+
+    func referenceTrack(surveyId: Int64) -> ReferenceTrack? {
+        let statement = prepare("""
+        SELECT _id, survey_id, name, source, imported_at, point_count
+        FROM reference_tracks WHERE survey_id = ? ORDER BY _id DESC LIMIT 1
+        """, [.int(surveyId)])
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return ReferenceTrack(id: sqlite3_column_int64(statement, 0),
+                              surveyId: sqlite3_column_int64(statement, 1),
+                              name: text(statement, 2),
+                              source: text(statement, 3),
+                              importedAt: sqlite3_column_int64(statement, 4),
+                              pointCount: Int(sqlite3_column_int64(statement, 5)))
+    }
+
+    /// Koordinat dalam urutan file. Hanya lat/lon karena peta menggambar geometri.
+    func referencePoints(surveyId: Int64) -> [ReferencePoint] {
+        let statement = prepare("""
+        SELECT p.lat, p.lon, p.ele, p.time_ms
+        FROM reference_points p JOIN reference_tracks t ON t._id = p.track_id
+        WHERE t.survey_id = ? ORDER BY p.track_id DESC, p.seq ASC
+        """, [.int(surveyId)])
+        defer { sqlite3_finalize(statement) }
+        var result: [ReferencePoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let time = sqlite3_column_type(statement, 3) == SQLITE_NULL
+                ? nil : sqlite3_column_int64(statement, 3)
+            result.append(ReferencePoint(lat: sqlite3_column_double(statement, 0),
+                                         lon: sqlite3_column_double(statement, 1),
+                                         elevation: optionalDouble(statement, 2),
+                                         time: time))
+        }
+        return result
+    }
+
+    func deleteReferenceTrack(surveyId: Int64) {
+        let statement = prepare("DELETE FROM reference_tracks WHERE survey_id = ?", [.int(surveyId)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
     }

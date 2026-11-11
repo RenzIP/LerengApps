@@ -1,6 +1,7 @@
 package id.bagas.lerengoffline;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -23,6 +24,15 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+
 import java.util.Locale;
 
 public final class LocationLoggingService extends Service implements LocationListener, SensorEventListener {
@@ -38,6 +48,12 @@ public final class LocationLoggingService extends Service implements LocationLis
     public static volatile long activeSurveyId = -1;
     private static final String CHANNEL_ID = "field_recording";
     private static final int NOTIFICATION_ID = 71;
+    /** Provider sintetis dari Fused Location Provider (Google Play Services). */
+    private static final String FUSED_PROVIDER = "fused";
+    /** Titik dengan akurasi horizontal di atas nilai ini tidak disimpan. */
+    static final float MAX_HORIZONTAL_ACCURACY_METERS = 30f;
+    /** Jeda minimum antar titik tersimpan; lebih rapat dari 9 detik agar tikungan tidak terpotong. */
+    private static final long SAVE_INTERVAL_MS = 5000L;
 
     private SurveyDatabase database;
     private LocationManager locationManager;
@@ -60,6 +76,8 @@ public final class LocationLoggingService extends Service implements LocationLis
     private long lastSavedLocationTime = 0;
     private boolean registered;
     private boolean saveScheduled;
+    private FusedLocationProviderClient fusedClient;
+    private boolean fusedActive;
     private final Handler locationHandler = new Handler(Looper.getMainLooper());
 
     @Override public void onCreate() {
@@ -124,6 +142,49 @@ public final class LocationLoggingService extends Service implements LocationLis
             updateNotification("Izin lokasi presisi diperlukan untuk pencatatan.");
             return;
         }
+        if (startFusedUpdates()) return;
+        startPlatformUpdates();
+    }
+
+    /**
+     * Fused Location Provider menggabungkan GNSS, Wi-Fi, dan sel seperti yang dipakai aplikasi
+     * olahraga populer. Hasilnya titik awal lebih cepat dan lebih stabil di bawah kanopi, tetapi
+     * lokasi melewati layanan Google Play; aplikasi ini tetap tidak mengunggah apa pun.
+     * Bila Play Services tidak tersedia, pemanggil memakai LocationManager biasa.
+     */
+    @SuppressLint("MissingPermission")
+    private boolean startFusedUpdates() {
+        try {
+            int availability = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this);
+            if (availability != ConnectionResult.SUCCESS) return false;
+            fusedClient = LocationServices.getFusedLocationProviderClient(this);
+            LocationRequest request = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
+                    .setMinUpdateIntervalMillis(2000L)
+                    .setMaxUpdateDelayMillis(0L)
+                    .setWaitForAccurateLocation(false)
+                    .build();
+            fusedClient.requestLocationUpdates(request, fusedCallback, Looper.getMainLooper());
+            fusedActive = true;
+            registered = true;
+            updateNotification("Lokasi presisi (Google Play Services) diminta; GNSS tetap sumber utama di luar jaringan.");
+            return true;
+        } catch (RuntimeException e) {
+            fusedClient = null;
+            fusedActive = false;
+            return false;
+        }
+    }
+
+    private final LocationCallback fusedCallback = new LocationCallback() {
+        @Override public void onLocationResult(LocationResult result) {
+            if (result == null) return;
+            for (Location location : result.getLocations()) {
+                if (location != null) onLocationChanged(location);
+            }
+        }
+    };
+
+    private void startPlatformUpdates() {
         boolean gnssStarted = false;
         boolean networkStarted = false;
         for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
@@ -195,14 +256,16 @@ public final class LocationLoggingService extends Service implements LocationLis
     @Override public void onLocationChanged(Location location) {
         if (location == null || surveyId < 0) return;
         String provider = location.getProvider();
-        if (LocationManager.GPS_PROVIDER.equals(provider)) latestGpsFix = new Location(location);
+        if (FUSED_PROVIDER.equals(provider)) {
+            if (fusedActive) latestGpsFix = new Location(location);
+        } else if (LocationManager.GPS_PROVIDER.equals(provider)) latestGpsFix = new Location(location);
         else if (LocationManager.NETWORK_PROVIDER.equals(provider)) {
             if (!internetAvailable) return;
             latestNetworkFix = new Location(location);
         }
         else return;
         long now = System.currentTimeMillis();
-        if (now - lastSavedAt < 9000 || saveScheduled) return;
+        if (now - lastSavedAt < SAVE_INTERVAL_MS || saveScheduled) return;
         saveScheduled = true;
         locationHandler.postDelayed(this::saveBestFix, 800L);
     }
@@ -211,9 +274,16 @@ public final class LocationLoggingService extends Service implements LocationLis
         saveScheduled = false;
         if (!isLogging || surveyId < 0) return;
         long now = System.currentTimeMillis();
-        if (now - lastSavedAt < 9000) return;
+        if (now - lastSavedAt < SAVE_INTERVAL_MS) return;
         Location location = chooseBestFreshFix(now);
         if (location == null) return;
+        if (location.hasAccuracy() && location.getAccuracy() > MAX_HORIZONTAL_ACCURACY_METERS) {
+            // Titik buruk tidak disimpan supaya jalur tidak melompat; titik berikutnya tetap dicoba.
+            updateNotification(String.format(Locale.getDefault(),
+                    "Titik dilewati: akurasi ±%d m di atas batas %d m.",
+                    Math.round(location.getAccuracy()), Math.round(MAX_HORIZONTAL_ACCURACY_METERS)));
+            return;
+        }
         Double altitude = location.hasAltitude() ? location.getAltitude() : null;
         Float verticalAccuracy = location.hasVerticalAccuracy() ? location.getVerticalAccuracyMeters() : null;
         String source = sourceForProvider(location.getProvider());
@@ -246,13 +316,15 @@ public final class LocationLoggingService extends Service implements LocationLis
             double accuracy = candidate.hasAccuracy() ? candidate.getAccuracy()
                     : (LocationManager.GPS_PROVIDER.equals(candidate.getProvider()) ? 100.0 : 1000.0);
             double score = accuracy + age / 1000.0 * 2.0;
-            if (LocationManager.GPS_PROVIDER.equals(candidate.getProvider())) score -= 0.01;
+            if (LocationManager.GPS_PROVIDER.equals(candidate.getProvider())
+                    || FUSED_PROVIDER.equals(candidate.getProvider())) score -= 0.01;
             if (score < bestScore) { best = candidate; bestScore = score; }
         }
         return best;
     }
 
     private String sourceForProvider(String provider) {
+        if (FUSED_PROVIDER.equals(provider)) return "Android Fused (Google Play Services)";
         if (LocationManager.GPS_PROVIDER.equals(provider)) return "Android GPS/GNSS";
         if (LocationManager.NETWORK_PROVIDER.equals(provider)) return "Android Network Location";
         return "Android location";
@@ -271,6 +343,11 @@ public final class LocationLoggingService extends Service implements LocationLis
             bleController = null;
         }
         unregisterConnectivityMonitor();
+        if (fusedClient != null) {
+            try { fusedClient.removeLocationUpdates(fusedCallback); } catch (RuntimeException ignored) {}
+            fusedClient = null;
+        }
+        fusedActive = false;
         if (registered && locationManager != null) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) {}
         }

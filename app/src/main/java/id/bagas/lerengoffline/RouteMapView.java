@@ -26,6 +26,9 @@ public final class RouteMapView extends View {
     private static final float MAX_USER_SCALE = 14f;
 
     private final List<SurveyDatabase.Point> points = new ArrayList<>();
+    /** Jalur pembanding dari GPX pihak lain; hanya geometri, tidak pernah masuk ke titik rekaman. */
+    private final List<double[]> reference = new ArrayList<>();
+    private String referenceLabel = "";
     private TerrainEngine.Result terrain;
     private long surveyId = -1;
     private boolean hasProjection;
@@ -41,11 +44,14 @@ public final class RouteMapView extends View {
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path trackPath = new Path();
+    private final Path referencePath = new Path();
     private final float[] projected = new float[2];
     private final RectF panel = new RectF();
     private final RectF labelBox = new RectF();
     private final DashPathEffect emptyDash =
             new DashPathEffect(new float[]{dp(5), dp(6)}, 0);
+    private final DashPathEffect referenceDash =
+            new DashPathEffect(new float[]{dp(7), dp(5)}, 0);
 
     private final ScaleGestureDetector scaleDetector;
     private final GestureDetector gestureDetector;
@@ -129,6 +135,31 @@ public final class RouteMapView extends View {
         updateContentDescription();
     }
 
+    /**
+     * Jalur pembanding digambar putus-putus di belakang jalur rekaman. Datanya terpisah dari
+     * tabel titik sehingga tidak pernah ikut diekspor sebagai hasil rekaman aplikasi ini.
+     */
+    public void setReferenceTrack(List<double[]> coordinates, String label) {
+        reference.clear();
+        referenceLabel = label == null ? "" : label.trim();
+        if (coordinates != null) {
+            for (double[] coordinate : coordinates) {
+                if (coordinate == null || coordinate.length < 2) continue;
+                if (!Double.isFinite(coordinate[0]) || !Double.isFinite(coordinate[1])) continue;
+                reference.add(new double[]{coordinate[0], coordinate[1]});
+            }
+        }
+        recomputeProjection();
+        refreshFitScale();
+        clampPan();
+        invalidate();
+        updateContentDescription();
+    }
+
+    public boolean hasReferenceTrack() {
+        return !reference.isEmpty();
+    }
+
     public void resetView() {
         userScale = 1f;
         panX = 0f;
@@ -172,6 +203,7 @@ public final class RouteMapView extends View {
         drawGrid(canvas, width, height);
         if (terrain != null && terrain.shouldRenderSurface && !terrain.contours.isEmpty())
             drawContours(canvas);
+        drawReference(canvas);
         drawTrack(canvas);
         drawWaypoints(canvas);
         if (trackCount() > 0) drawMarker(canvas, firstTrackPoint(), true);
@@ -179,12 +211,13 @@ public final class RouteMapView extends View {
         drawNorthArrow(canvas, width);
         drawScaleBar(canvas, width, height);
         drawBadge(canvas);
+        drawReferenceLegend(canvas);
     }
 
     // ------------------------------------------------------------------ data
 
     private boolean hasContent() {
-        return trackCount() > 0 || waypointCount() > 0
+        return trackCount() > 0 || waypointCount() > 0 || !reference.isEmpty()
                 || (terrain != null && !terrain.samples.isEmpty());
     }
 
@@ -218,6 +251,10 @@ public final class RouteMapView extends View {
             originLatitude = points.get(0).lat;
             originLongitude = points.get(0).lon;
             longitudeScale = Math.max(0.01, Math.cos(Math.toRadians(originLatitude)));
+        } else if (!reference.isEmpty()) {
+            originLatitude = reference.get(0)[0];
+            originLongitude = reference.get(0)[1];
+            longitudeScale = Math.max(0.01, Math.cos(Math.toRadians(originLatitude)));
         }
 
         minX = Double.POSITIVE_INFINITY;
@@ -227,6 +264,9 @@ public final class RouteMapView extends View {
         for (SurveyDatabase.Point point : points) {
             double x = xMeters(point.lat, point.lon), y = yMeters(point.lat);
             include(x, y);
+        }
+        for (double[] coordinate : reference) {
+            include(xMeters(coordinate[0], coordinate[1]), yMeters(coordinate[0]));
         }
         if (terrain != null && terrain.shouldRenderSurface) {
             for (TerrainEngine.Segment segment : terrain.contours) {
@@ -354,6 +394,50 @@ public final class RouteMapView extends View {
         stroke.setColor(color(R.color.primary));
         stroke.setAlpha(255);
         canvas.drawPath(trackPath, stroke);
+    }
+
+    private void drawReference(Canvas canvas) {
+        if (reference.isEmpty()) return;
+        referencePath.reset();
+        boolean first = true;
+        double[] previous = null;
+        for (double[] coordinate : reference) {
+            if (!project(xMeters(coordinate[0], coordinate[1]), yMeters(coordinate[0]))) continue;
+            float x = projected[0], y = projected[1];
+            boolean breakLine = previous != null
+                    && RouteProfileEngine.distanceMeters(previous[0], previous[1], coordinate[0], coordinate[1]) > 2000;
+            if (first || breakLine) referencePath.moveTo(x, y); else referencePath.lineTo(x, y);
+            first = false;
+            previous = coordinate;
+        }
+        if (first) return;
+
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setStrokeWidth(dp(2.2f));
+        stroke.setColor(color(R.color.accent));
+        stroke.setAlpha(215);
+        stroke.setPathEffect(referenceDash);
+        canvas.drawPath(referencePath, stroke);
+        stroke.setPathEffect(null);
+        stroke.setAlpha(255);
+    }
+
+    private void drawReferenceLegend(Canvas canvas) {
+        if (reference.isEmpty()) return;
+        float y = dp(12) + sp(9) + dp(8) + dp(15);
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setStrokeWidth(dp(2.2f));
+        stroke.setColor(color(R.color.accent));
+        stroke.setPathEffect(referenceDash);
+        canvas.drawLine(dp(14), y, dp(40), y, stroke);
+        stroke.setPathEffect(null);
+
+        String text = referenceLabel.isEmpty() ? "jalur pembanding" : referenceLabel;
+        if (text.length() > 26) text = text.substring(0, 25) + "…";
+        label.setTextSize(sp(9.5f));
+        label.setTextAlign(Paint.Align.LEFT);
+        label.setColor(color(R.color.text_muted));
+        canvas.drawText(text, dp(46), y + sp(3.4f), label);
     }
 
     private void drawWaypoints(Canvas canvas) {
@@ -503,8 +587,9 @@ public final class RouteMapView extends View {
             previous = point;
         }
         String description = String.format(Locale.getDefault(),
-                "Peta jalur offline. %d titik jalur, %d waypoint, %.2f kilometer. Tanpa ubin daring. Cubit untuk zoom, ketuk dua kali untuk mengatur ulang.",
-                trackCount(), waypointCount(), distance / 1000.0);
+                "Peta jalur offline. %d titik jalur, %d waypoint, %.2f kilometer. %s Tanpa ubin daring. Cubit untuk zoom, ketuk dua kali untuk mengatur ulang.",
+                trackCount(), waypointCount(), distance / 1000.0,
+                reference.isEmpty() ? "" : reference.size() + " titik jalur pembanding (garis putus-putus). ");
         setContentDescription(description);
     }
 

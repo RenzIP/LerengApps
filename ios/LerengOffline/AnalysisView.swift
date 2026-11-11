@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ElevationSample: Identifiable {
     let id: Int
@@ -15,6 +16,8 @@ struct PeerSummary: Identifiable {
 
 struct AnalysisView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showingReferenceImporter = false
+    @State private var showingDeleteReference = false
 
     private var summary: RouteSummary { model.summary }
 
@@ -57,6 +60,7 @@ struct AnalysisView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     mapCard
+                    referenceCard
                     profileCard
                     presenceCard
                 }
@@ -65,20 +69,103 @@ struct AnalysisView: View {
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Analisis")
             .navigationBarTitleDisplayMode(.inline)
+            .fileImporter(isPresented: $showingReferenceImporter,
+                          allowedContentTypes: referenceTypes,
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { model.importReferenceGPX(from: url) }
+                case .failure(let error):
+                    model.alertMessage = "Tidak dapat membuka file: \(error.localizedDescription)"
+                }
+            }
+            .confirmationDialog("Pakai sebagai jalur pembanding?",
+                                isPresented: pendingImportBinding,
+                                titleVisibility: .visible) {
+                Button("Pakai") { model.confirmReferenceImport() }
+                Button("Batal", role: .cancel) { model.cancelReferenceImport() }
+            } message: {
+                Text(model.pendingReferenceImport?.message ?? "")
+            }
+            .confirmationDialog("Hapus jalur pembanding?",
+                                isPresented: $showingDeleteReference,
+                                titleVisibility: .visible) {
+                Button("Hapus", role: .destructive) { model.deleteReferenceTrack() }
+                Button("Batal", role: .cancel) {}
+            } message: {
+                Text("Hanya jalur pembanding yang dihapus. Titik rekaman aplikasi tidak terpengaruh.")
+            }
         }
+    }
+
+    private var referenceTypes: [UTType] {
+        var types: [UTType] = [.xml]
+        if let gpx = UTType(filenameExtension: "gpx") { types.insert(gpx, at: 0) }
+        return types
+    }
+
+    private var pendingImportBinding: Binding<Bool> {
+        Binding(get: { model.pendingReferenceImport != nil },
+                set: { shown in if !shown { model.cancelReferenceImport() } })
     }
 
     private var mapCard: some View {
         SectionCard("Peta rute offline") {
-            if summary.trackCount == 0 {
+            if summary.trackCount == 0 && model.referencePoints.isEmpty {
                 emptyHint("Belum ada titik jalur. Peta muncul setelah rekaman dimulai.")
             } else {
-                RouteMapView(points: model.points)
+                RouteMapView(points: model.points,
+                             reference: model.referencePoints,
+                             referenceLabel: model.referenceTrack?.name ?? "")
                     .frame(height: 280)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                Text("Peta memakai kerangka peta bawaan iOS. Ubin peta yang sudah diunduh sistem dapat tampil tanpa jaringan; aplikasi tidak mengunduh ubin sendiri.")
+                Text("Peta memakai kerangka peta bawaan iOS. Ubin peta yang sudah diunduh sistem dapat tampil tanpa jaringan; aplikasi tidak mengunduh ubin sendiri."
+                     + (model.referencePoints.isEmpty ? "" : " Garis putus-putus adalah jalur pembanding, bukan hasil rekaman aplikasi ini."))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var referenceCard: some View {
+        SectionCard("Jalur pembanding (GPX)") {
+            if let track = model.referenceTrack {
+                Text(track.name)
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(track.pointCount) titik • diimpor \(Format.time(track.importedAt))"
+                     + (track.source.isEmpty ? "" : " • \(track.source)"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 10) {
+                    Button {
+                        showingReferenceImporter = true
+                    } label: {
+                        Label("Ganti GPX", systemImage: "arrow.triangle.2.circlepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(role: .destructive) {
+                        showingDeleteReference = true
+                    } label: {
+                        Label("Hapus", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                emptyHint("Impor GPX dari aplikasi lain (mis. ekspor Strava) untuk dibandingkan dengan rekaman sendiri. "
+                          + "Garis putus-putus; tidak digabung ke titik rekaman dan tidak ikut diekspor.")
+                Button {
+                    showingReferenceImporter = true
+                } label: {
+                    Label("Impor GPX", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
