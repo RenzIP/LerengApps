@@ -1,16 +1,17 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 11,
-  "versionName": "2.5.2",
+  "versionCode": 12,
+  "versionName": "2.5.3",
   "mandatory": true,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.2/LerengOffline-2.5.2.apk",
-  "sizeBytes": 172291,
-  "sha256": "d5c541815981c4f237440788fbf408cca81cb10ca38feae3879856ea340dd6c9",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.3/LerengOffline-2.5.3.apk",
+  "sizeBytes": 2691769,
+  "sha256": "4a9b8320aa3331266f1658e124e70ea515b3ad963f57eee476a286bd4c8a746b",
   "notes": [
-    "Iklan BLE menyertakan manufacturer data 0xFFFF agar iPhone dapat menemukan Android",
-    "Iklan otomatis dipersempit bila ponsel menolak paket penuh",
-    "Pesan status BLE menjelaskan dukungan lintas platform"
+    "Android memakai Fused Location Provider (Google Play Services) dengan fallback GNSS",
+    "Titik dengan akurasi horizontal di atas 30 m tidak disimpan",
+    "Jalur pembanding GPX dari ekspor Strava dapat diimpor dan digambar putus-putus",
+    "Jalur pembanding disimpan terpisah dan tidak ikut diekspor"
   ],
-  "publishedAt": "2026-11-10T06:06:48Z"
+  "publishedAt": "2026-11-11T02:52:01Z"
 }
