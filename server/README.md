@@ -2,7 +2,9 @@
 
 Folder ini berisi satu fungsi serverless yang menerima data dari tombol
 **Sinkron otomatis** di aplikasi. Server ini yang memegang `MONGODB_URI`;
-APK dan IPA hanya menyimpan alamat endpoint dan token.
+APK dan IPA sudah membawa alamat endpoint serta kunci aplikasi sejak build, sehingga tidak ada
+yang perlu diisi pengguna. Kunci itu ikut di dalam berkas aplikasi dan **bukan rahasia**—server
+yang memegang `MONGODB_URI` dan melakukan validasi serta pembatasan.
 
 Data ditulis sebagai satu dokumen per Fitur GeoJSON:
 
@@ -111,7 +113,7 @@ Tambahkan Environment Variables untuk **Production** (dan Preview):
 | Nama | Wajib | Isi |
 | --- | --- | --- |
 | `MONGODB_URI` | ya | connection string Atlas |
-| `INGEST_TOKEN` | ya | token acak, mis. hasil `openssl rand -hex 32` |
+| `INGEST_TOKEN` | ya | kunci aplikasi; harus sama dengan nilai yang ditanam di build (`lerengSyncToken` / `LERENG_SYNC_TOKEN`) |
 | `MONGODB_DB` | tidak | default `lereng` |
 | `MONGODB_COLL` | tidak | default `features` |
 
@@ -154,14 +156,21 @@ Balasan sukses:
 {"ok":true,"received":1,"inserted":1,"updated":0,"matched":0}
 ```
 
-## 4. Isi alamat di aplikasi
+## 4. Arahkan aplikasi ke endpoint
 
-Buka tab **Data** → kartu **Sinkron otomatis**:
+Build rilis sudah membawa alamat dan kunci aplikasi, jadi aplikasi langsung mengirim setelah
+dipasang. Yang perlu disiapkan hanya sisi server: `INGEST_TOKEN` harus sama dengan kunci yang
+ditanam di `gradle.properties` (Android) dan `project.yml` (iOS).
+
+Untuk mengarahkan ke server lain tanpa membangun ulang, buka tab **Data** → **Sinkron
+otomatis** → **Pengaturan lanjutan**:
 
 1. Isi endpoint, mis. `https://<proyek>.vercel.app/api/ingest`.
    Alamat dasar tanpa path juga diterima; aplikasi menambahkan `/api/ingest`.
-2. Isi token yang sama dengan `INGEST_TOKEN`.
+2. Isi kunci yang sama dengan `INGEST_TOKEN`.
 3. Tekan **Simpan pengaturan**.
+
+Tombol **Kembalikan ke bawaan** menghapus timpaan dan memakai nilai tertanam lagi.
 
 Setelah itu aplikasi mengirim sendiri data baru dari **semua proyek**: titik track,
 waypoint, event presence BLE, dan metadata proyek. Tidak ada tombol kirim.
@@ -214,7 +223,15 @@ mongoexport --uri "$MONGODB_URI" --db lereng --collection features \
 - Maksimum 800 Fitur per permintaan; aplikasi mengirim per 300 Fitur.
 - Badan permintaan dibatasi 4 MB dan tiap dokumen 512 KB.
 - Hanya `POST` dengan `Authorization: Bearer <INGEST_TOKEN>` yang diterima.
+- **Kunci aplikasi bukan rahasia.** Nilainya ikut di APK/IPA dan dapat dibongkar siapa pun yang
+  memegang berkas aplikasi. Karena itu pengamanan sebenarnya ada di server: validasi skema,
+  batas ukuran dan jumlah Fitur, serta batas laju 120 permintaan/menit per IP (Docker;
+  `RATE_LIMIT_PER_MINUTE`). Pengguna MongoDB sebaiknya dibatasi hanya ke database `lereng` dan
+  koleksi `features`.
+- Mengganti kunci berarti: perbarui `INGEST_TOKEN` di server, lalu bangun ulang APK/IPA dengan
+  kunci baru. Versi lama akan ditolak `401`.
 - Nama field yang mengandung `.`, diawali `$`, atau berisi null ditolak.
-- Token salah → `401`; konfigurasi server kurang → `500`; MongoDB gagal → `502`.
-- Jangan commit `.env`, connection string, atau token. File `.gitignore`
+- Kunci salah → `401`; terlalu sering → `429 rate_limited`; konfigurasi server kurang → `500`;
+  MongoDB gagal → `502`.
+- Jangan commit `.env`, connection string, atau kunci. File `.gitignore`
   pada folder ini sudah menutup `.env` dan `node_modules`.

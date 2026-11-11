@@ -14,4 +14,18 @@ enum AppConfig {
         let raw = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return Int(raw) ?? 1
     }
+
+    /// Endpoint dan kunci aplikasi yang ditanam saat build, supaya pengguna
+    /// tidak perlu mengisi apa pun. Nilainya ikut di dalam IPA, jadi BUKAN
+    /// rahasia; server yang memegang kredensial dan melakukan validasi serta
+    /// pembatasan laju.
+    static var defaultSyncEndpoint: String {
+        (Bundle.main.object(forInfoDictionaryKey: "LerengSyncEndpoint") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static var defaultSyncToken: String {
+        (Bundle.main.object(forInfoDictionaryKey: "LerengSyncToken") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }

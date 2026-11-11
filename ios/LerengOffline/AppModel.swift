@@ -54,8 +54,8 @@ final class AppModel: ObservableObject {
     @Published var isRecording = false
     @Published var statusText = "Siap merekam"
     @Published var exportItem: ExportItem?
-    @Published var syncEndpoint = UserDefaults.standard.string(forKey: MongoSync.endpointKey) ?? ""
-    @Published var syncToken = SyncTokenStore.load()
+    @Published var syncEndpoint = MongoSync.effectiveEndpointString()
+    @Published var syncToken = MongoSync.effectiveToken()
     @Published var autoSyncEnabled = MongoSync.isAutoEnabled()
     @Published var syncStatus: String?
     @Published var isSyncing = false
@@ -429,8 +429,12 @@ final class AppModel: ObservableObject {
     // MARK: - Sinkron otomatis ke MongoDB
 
     var syncConfigured: Bool {
-        !syncEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !syncToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        MongoSync.currentConfig() != nil
+    }
+
+    /// True bila build ini sudah membawa endpoint dan kunci bawaan.
+    var syncBuiltIn: Bool {
+        MongoSync.hasBuiltInTarget
     }
 
     /// Menyimpan alamat dan token secara lokal. Token masuk Keychain.
@@ -472,16 +476,26 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Menghapus pengaturan simpanan. Kalau build membawa endpoint bawaan,
+    /// aplikasi kembali ke bawaan dan tetap menyinkron; kalau tidak, sinkron
+    /// dimatikan.
     func clearSyncSettings() {
         UserDefaults.standard.removeObject(forKey: MongoSync.endpointKey)
         SyncTokenStore.clear()
-        syncEndpoint = ""
-        syncToken = ""
-        autoSyncEnabled = false
-        MongoSync.setAutoEnabled(false)
         scheduledSync?.cancel()
         scheduledSync = nil
-        syncStatus = "Alamat dan token dihapus. Sinkron otomatis dimatikan."
+        syncEndpoint = MongoSync.effectiveEndpointString()
+        syncToken = MongoSync.effectiveToken()
+        if syncConfigured {
+            autoSyncEnabled = true
+            MongoSync.setAutoEnabled(true)
+            syncStatus = "Kembali ke pengaturan bawaan. Sinkron otomatis aktif."
+            scheduleSync(delay: 1, force: true)
+        } else {
+            autoSyncEnabled = false
+            MongoSync.setAutoEnabled(false)
+            syncStatus = "Alamat dan kunci dihapus. Sinkron otomatis dimatikan."
+        }
     }
 
     /// Menunda sinkron sebentar supaya banyak titik beruntun dikirim sekali.

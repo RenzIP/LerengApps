@@ -118,23 +118,6 @@ struct DataView: View {
                 }
             }
 
-            TextField("https://proyek.vercel.app/api/ingest", text: $model.syncEndpoint)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textContentType(.URL)
-
-            SecureField("Token yang sama dengan INGEST_TOKEN", text: $model.syncToken)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textContentType(.password)
-
-            Button {
-                model.saveSyncSettings()
-            } label: {
-                Label("Simpan pengaturan", systemImage: "key")
-            }
-
             if model.isSyncing {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -148,15 +131,41 @@ struct DataView: View {
                     .foregroundStyle(statusColor(status))
             }
 
-            Button(role: .destructive) {
-                model.clearSyncSettings()
-            } label: {
-                Label("Hapus alamat & token", systemImage: "trash")
+            if model.syncBuiltIn {
+                Text("Endpoint sudah terpasang di aplikasi ini. Tidak ada yang perlu diisi.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            DisclosureGroup("Pengaturan lanjutan") {
+                TextField("https://proyek.vercel.app/api/ingest", text: $model.syncEndpoint)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.URL)
+
+                SecureField("Kunci aplikasi", text: $model.syncToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.password)
+
+                Button {
+                    model.saveSyncSettings()
+                } label: {
+                    Label("Simpan pengaturan", systemImage: "key")
+                }
+
+                Button(role: .destructive) {
+                    model.clearSyncSettings()
+                } label: {
+                    Label(model.syncBuiltIn ? "Kembalikan ke bawaan" : "Hapus alamat & kunci",
+                          systemImage: "trash")
+                }
             }
         } header: {
             Text("Sinkron otomatis ke MongoDB")
         } footer: {
-            Text("Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek; saat aplikasi aktif; dan berkala di background bila iOS mengizinkan. Endpoint HTTPS milikmu yang menyimpan URI MongoDB—aplikasi hanya menyimpan alamat dan token. Token disimpan di Keychain. Jalur pembanding GPX tidak pernah dikirim. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.")
+            Text("Semua proyek dikirim sendiri: titik, waypoint, presence BLE, dan metadata proyek. Endpoint dan kunci aplikasi sudah tertanam di build ini, jadi tidak ada yang perlu diisi; kunci itu bukan rahasia dan pengamanan ada di server. Jalur pembanding GPX tidak pernah dikirim. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.")
         }
     }
 

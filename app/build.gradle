@@ -6,6 +6,12 @@ plugins {
 // Kosong berarti fitur nonaktif dan APK tetap sepenuhnya offline.
 def lerengUpdateUrl = (project.findProperty('lerengUpdateUrl') ?: '').toString()
 
+// Sinkron otomatis: endpoint dan kunci aplikasi ditanam saat build supaya
+// pengguna tidak perlu mengisi apa pun. Nilai ini ada di APK, jadi BUKAN
+// rahasia; pengamanan sebenarnya ada di server (validasi, batas, rate limit).
+def lerengSyncEndpoint = (project.findProperty('lerengSyncEndpoint') ?: '').toString()
+def lerengSyncToken = (project.findProperty('lerengSyncToken') ?: '').toString()
+
 android {
     namespace 'id.bagas.lerengoffline'
     compileSdk 35
@@ -14,9 +20,11 @@ android {
         applicationId 'id.bagas.lerengoffline'
         minSdk 26
         targetSdk 34
-        versionCode 14
-        versionName '2.5.5'
+        versionCode 15
+        versionName '2.5.6'
         buildConfigField 'String', 'UPDATE_MANIFEST_URL', "\"${lerengUpdateUrl}\""
+        buildConfigField 'String', 'SYNC_ENDPOINT', "\"${lerengSyncEndpoint}\""
+        buildConfigField 'String', 'SYNC_TOKEN', "\"${lerengSyncToken}\""
     }
 
     compileOptions {

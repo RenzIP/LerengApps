@@ -72,16 +72,20 @@ Aplikasi tidak pernah menyimpan URI MongoDB. Ada dua jalur untuk memasukkannya:
 
 ### Sinkron otomatis ke MongoDB (butuh internet)
 
-Tab **Data** → kartu **Sinkron otomatis** meminta alamat endpoint HTTPS dan token.
-Server kecil di folder [`server/`](server/README.md) yang memegang `MONGODB_URI`;
-APK/IPA hanya menyimpan alamat dan token (Android: penyimpanan privat aplikasi,
-iOS: Keychain). Setelah endpoint dan token diisi, aplikasi mengirim **semua proyek**
-secara otomatis: titik track, waypoint, event presence BLE, dan metadata proyek.
-Tidak ada tombol kirim.
+Endpoint dan kunci aplikasi **sudah tertanam saat build** (lihat
+`gradle.properties` dan `ios/project.yml`), jadi aplikasi langsung mengirim tanpa
+isian apa pun. Server kecil di folder [`server/`](server/README.md) memegang
+`MONGODB_URI`; APK/IPA hanya membawa alamat dan kunci aplikasi. Kunci itu ikut di
+dalam berkas aplikasi sehingga **bukan rahasia**—pengamanannya ada di server:
+validasi skema, batas ukuran, batas jumlah Fitur, dan batas laju per IP.
+
+Aplikasi mengirim **semua proyek** secara otomatis: titik track, waypoint, event
+presence BLE, dan metadata proyek. Tidak ada tombol kirim. Kolom alamat dan kunci
+masih tersedia di **Pengaturan lanjutan** bila perlu diarahkan ke server lain.
 
 Pengiriman bersifat inkremental. Tanda air per proyek menyimpan ID lokal terakhir
 yang sudah terkirim, sehingga titik lama tidak dikirim ulang. Setiap Fitur punya
-`_id` stabil, jadi percobaan ulang hanya memperbarui dokumen yang sama—bukan
+`_id` stabil, jadi percobaan ulang hanya memperbarui dokumen yang sama-bukan
 menggandakan. Metadata proyek dikirim ulang hanya bila nama atau identitas berubah.
 
 Pemicu sinkron:

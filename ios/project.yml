@@ -24,17 +24,21 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: id.bagas.lerengoffline.ios
         PRODUCT_NAME: LerengOffline
-        MARKETING_VERSION: "1.4.0"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "1.4.1"
+        CURRENT_PROJECT_VERSION: "6"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LERENG_SYNC_ENDPOINT: "https://lereng.bagasip.my.id"
+        LERENG_SYNC_TOKEN: "a496ec3bae68f5fd2424206aa097fa3e642ca6b34f959a95"
     info:
       path: LerengOffline/Info.plist
       properties:
         CFBundleDisplayName: Lereng Offline
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LerengSyncEndpoint: $(LERENG_SYNC_ENDPOINT)
+        LerengSyncToken: $(LERENG_SYNC_TOKEN)
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:

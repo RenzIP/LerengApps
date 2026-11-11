@@ -2,9 +2,9 @@
 
 Aplikasi native SwiftUI dengan perilaku yang sama seperti aplikasi Android: merekam jalur
 pendakian secara offline, menandai waypoint, mencatat kehadiran BLE, dan mengekspor data ke
-berkas lokal. Tidak ada konversi datum. Setelah endpoint HTTPS dan token diisi, data baru
-dikirim **otomatis** ke MongoDB milik pengguna—tanpa tombol kirim. Jalur pembanding GPX tidak
-ikut.
+berkas lokal. Tidak ada konversi datum. Endpoint HTTPS dan kunci aplikasi sudah **tertanam saat
+build**, jadi data baru langsung dikirim **otomatis** ke MongoDB milik pengguna—tanpa isian apa
+pun dan tanpa tombol kirim. Jalur pembanding GPX tidak ikut.
 
 ## Status
 
@@ -39,7 +39,7 @@ BLE hanya dapat diuji di perangkat fisik.
 | `BlePresence.swift` | CoreBluetooth: advertise GATT + baca manufacturer data |
 | `BleGroupCodec.swift` | Format kabel BLE identik dengan Android |
 | `Exporters.swift` | CSV, GPX 1.1, GeoJSON, JSON Lines |
-| `MongoSync.swift` | Sinkron otomatis inkremental ke endpoint HTTPS; token di Keychain |
+| `MongoSync.swift` | Sinkron otomatis inkremental ke endpoint HTTPS; endpoint + kunci bawaan dari Info.plist |
 | `BackgroundSync.swift` | `BGAppRefreshTask` best effort untuk sinkron latar belakang |
 | `UpdateChecker.swift` | Manifes pembaruan `lereng.ios-update/1` |
 | `AppModel.swift` | Keadaan aplikasi, rekaman, ekspor, identitas |
@@ -61,9 +61,18 @@ BLE hanya dapat diuji di perangkat fisik.
 
 ## Sinkron otomatis
 
-Tab **Data** → bagian **Sinkron otomatis ke MongoDB** menyimpan alamat endpoint HTTPS dan token
-(Keychain). Sinkron berjalan untuk **semua proyek** dan hanya mengirim record di atas tanda air
-lokal per proyek, sehingga titik lama tidak dikirim ulang.
+Tab **Data** → bagian **Sinkron otomatis ke MongoDB** langsung aktif: alamat endpoint dan kunci
+aplikasi dibaca dari `Info.plist` (`LerengSyncEndpoint`, `LerengSyncToken`) yang diisi
+`project.yml` saat build. Tidak ada yang perlu diketik setelah aplikasi terpasang.
+
+Kunci itu ikut di dalam IPA, jadi **bukan rahasia**; pengamanannya ada di server (validasi
+skema, batas ukuran, batas jumlah Fitur, dan batas laju per IP). Mengganti kunci berarti membangun
+ulang aplikasi dan memperbarui `INGEST_TOKEN` di server. Alamat dan kunci masih dapat ditimpa
+lewat **Pengaturan lanjutan** (disimpan di UserDefaults dan Keychain); tombol
+**Kembalikan ke bawaan** menghapus timpaan itu.
+
+Sinkron berjalan untuk **semua proyek** dan hanya mengirim record di atas tanda air lokal per
+proyek, sehingga titik lama tidak dikirim ulang.
 
 - Pemicu: titik/waypoint/presence baru (ditunda agar beruntun tergabung), aplikasi kembali aktif,
   rekaman dihentikan, dan `BGAppRefreshTask` (`id.bagas.lerengoffline.sync`) bila iOS memberi

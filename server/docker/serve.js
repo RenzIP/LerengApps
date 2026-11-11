@@ -15,6 +15,30 @@ const handler = require('../api/ingest');
 const PORT = Number(process.env.PORT || 8080);
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
+// Kunci aplikasi ikut tertanam di APK/IPA, jadi endpoint ini praktis publik.
+// Batas laju per IP mencegah satu klien membanjiri koleksi.
+const RATE_LIMIT = Number(process.env.RATE_LIMIT_PER_MINUTE || 120);
+const rateBuckets = new Map();
+
+function rateAllowed(ip) {
+  const now = Date.now();
+  const entry = rateBuckets.get(ip);
+  if (!entry || now - entry.start > 60_000) {
+    rateBuckets.set(ip, { start: now, count: 1 });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= RATE_LIMIT;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateBuckets) {
+    if (now - entry.start > 120_000) rateBuckets.delete(key);
+  }
+}, 60_000).unref();
+
+
 function makeResponse(res) {
   let statusCode = 200;
   const headers = {};
@@ -112,6 +136,20 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.stringify({ ok: false, error: 'body_too_large' });
     res.writeHead(error.statusCode || 400, {
       'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    res.end(body);
+    return;
+  }
+
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const clientIp = String(req.headers['cf-connecting-ip'] || forwarded
+    || req.socket.remoteAddress || 'unknown');
+  if (!rateAllowed(clientIp)) {
+    const body = JSON.stringify({ ok: false, error: 'rate_limited' });
+    res.writeHead(429, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Retry-After': '60',
       'Content-Length': Buffer.byteLength(body),
     });
     res.end(body);

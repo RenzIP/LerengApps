@@ -715,7 +715,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout exportCard = UiKit.card(this);
         exportCard.addView(UiKit.cardHeader(this, R.drawable.ic_export, "Gabungkan & ekspor", null));
         exportCard.addView(UiKit.caption(this,
-                "CSV menggabungkan peserta dan event BLE. GPX mencadangkan jalur + waypoint. GeoJSON = satu LineString + waypoint; JSONL = satu dokumen per titik untuk MongoDB. Ekspor sendiri tidak mengunggah; unggahan ke MongoDB berjalan otomatis di latar belakang saat endpoint dan token sudah diisi."),
+                "CSV menggabungkan peserta dan event BLE. GPX mencadangkan jalur + waypoint. GeoJSON = satu LineString + waypoint; JSONL = satu dokumen per titik untuk MongoDB. Ekspor sendiri tidak mengunggah; unggahan ke MongoDB berjalan otomatis di latar belakang tanpa perlu diatur."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
@@ -842,7 +842,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
-                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan otomatis. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Jika sinkron otomatis aktif dan endpoint serta token sudah diisi, data baru dikirim sendiri ke endpoint HTTPS milikmu yang menulis ke MongoDB. Token disimpan di penyimpanan privat aplikasi, bukan URI MongoDB. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.\n\n"
+                + "Track, event, dan dataset tersimpan di SQLite privat perangkat. Tidak ada pencadangan otomatis. Ekspor GPX/CSV/GeoJSON hanya melalui pemilih file Android; file ekspor tidak diunggah. Sinkron otomatis sudah terpasang di aplikasi: data baru dikirim sendiri ke endpoint HTTPS yang menulis ke MongoDB milikmu. Kunci aplikasi tertanam di APK, bukan URI MongoDB, dan bukan rahasia—pengamanan ada di server. Tanpa internet, data menunggu dan dikirim saat koneksi kembali.\n\n"
                 + "BATERAI\n"
                 + "Beberapa produsen membatasi proses background. Jika rekaman terputus saat layar mati, izinkan aktivitas background atau nonaktifkan optimasi baterai untuk Lereng Offline. Izin lokasi “Saat digunakan” juga dapat menghentikan rekaman di background pada sebagian perangkat.",
                 12);
@@ -863,7 +863,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
 
         UiKit.addCard(page, aboutCard, 12);
 
-        TextView footer = UiKit.caption(this, "Data tetap di perangkat sampai kamu mengirimnya.");
+        TextView footer = UiKit.caption(this, "Data dikirim otomatis ke MongoDB milikmu saat ada koneksi.");
         footer.setGravity(Gravity.CENTER);
         page.addView(footer, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
@@ -874,28 +874,34 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout card = UiKit.card(this);
         card.addView(UiKit.cardHeader(this, R.drawable.ic_database, "Sinkron otomatis", "MONGODB"));
         card.addView(UiKit.caption(this,
-                "Semua proyek dikirim otomatis saat ada data baru, saat aplikasi dibuka, dan berkala di background. "
-                + "Endpoint HTTPS milikmu yang menyimpan URI MongoDB; aplikasi hanya menyimpan alamat dan token. "
+                "Endpoint sudah terpasang di aplikasi ini. Tidak ada yang perlu diisi: semua proyek dikirim sendiri "
+                + "saat ada data baru, saat aplikasi dibuka, dan berkala di background. "
+                + "Server yang menyimpan URI MongoDB; aplikasi hanya membawa alamat dan kunci aplikasi. "
                 + "Jalur pembanding GPX tidak ikut."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 8, 0, 0));
 
-        card.addView(UiKit.sectionLabel(this, "Endpoint HTTPS"),
+        LinearLayout advanced = new LinearLayout(this);
+        advanced.setOrientation(LinearLayout.VERTICAL);
+        final boolean builtInTarget = MongoSync.hasBuiltInTarget();
+        advanced.setVisibility(builtInTarget ? View.GONE : View.VISIBLE);
+
+        advanced.addView(UiKit.sectionLabel(this, "Endpoint HTTPS"),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 14, 0, 0));
         syncEndpointInput = UiKit.input(this, "https://proyek.vercel.app/api/ingest");
         syncEndpointInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         syncEndpointInput.setAutofillHints(View.AUTOFILL_HINT_USERNAME);
-        card.addView(syncEndpointInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+        advanced.addView(syncEndpointInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
 
-        card.addView(UiKit.sectionLabel(this, "Token"),
+        advanced.addView(UiKit.sectionLabel(this, "Token"),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
         syncTokenInput = UiKit.input(this, "Token yang sama dengan INGEST_TOKEN");
         syncTokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         syncTokenInput.setAutofillHints(View.AUTOFILL_HINT_PASSWORD);
-        card.addView(syncTokenInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+        advanced.addView(syncTokenInput, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 6, 0, 0));
 
         syncToggle = new Switch(this);
@@ -924,9 +930,20 @@ public final class MainActivity extends Activity implements LocationListener, Se
         card.addView(syncToggle, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
 
+        if (builtInTarget) {
+            Button advancedButton = UiKit.button(this, "Ubah alamat atau token",
+                    UiKit.STYLE_GHOST, R.drawable.ic_settings);
+            advancedButton.setOnClickListener(v -> advanced.setVisibility(
+                    advanced.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+            card.addView(advancedButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(44), 0, 4, 0, 0));
+        }
+        card.addView(advanced, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0));
+
         Button saveButton = UiKit.button(this, "Simpan pengaturan", UiKit.STYLE_SECONDARY, R.drawable.ic_settings);
         saveButton.setOnClickListener(v -> saveSyncSettings());
-        card.addView(saveButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+        advanced.addView(saveButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(46), 0, 10, 0, 0));
 
         syncStatusText = UiKit.text(this, "Belum diatur.", 13.5f, R.color.warning, Typeface.BOLD);
@@ -934,26 +951,41 @@ public final class MainActivity extends Activity implements LocationListener, Se
         card.addView(syncStatusText, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 12, 0, 0));
         card.addView(UiKit.caption(this,
-                "Token disimpan di penyimpanan privat aplikasi. Tidak ada tombol kirim: sinkron berjalan sendiri "
-                + "selama sakelar aktif dan endpoint terisi. Matikan sakelar untuk berhenti; data tetap tersimpan lokal."),
+                "Tidak ada tombol kirim: sinkron berjalan sendiri selama sakelar aktif. "
+                + "Matikan sakelar untuk berhenti; data tetap tersimpan lokal."),
                 UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT, 0, 4, 0, 0));
 
-        Button clearButton = UiKit.button(this, "Hapus alamat & token", UiKit.STYLE_GHOST, R.drawable.ic_trash);
+        Button clearButton = UiKit.button(this,
+                builtInTarget ? "Kembalikan ke pengaturan bawaan" : "Hapus alamat & token",
+                UiKit.STYLE_GHOST, R.drawable.ic_trash);
         clearButton.setTextColor(getColor(R.color.danger));
         Drawable[] clearDrawables = clearButton.getCompoundDrawablesRelative();
         if (clearDrawables[0] != null) clearDrawables[0].setTint(getColor(R.color.danger));
         clearButton.setOnClickListener(v -> {
             MongoSync.clear(this);
             MongoSyncScheduler.cancelAll(this);
-            syncEndpointInput.setText("");
-            syncTokenInput.setText("");
-            suppressSyncToggle = true;
-            syncToggle.setChecked(false);
-            suppressSyncToggle = false;
-            setSyncStatus("Alamat dan token dihapus. Sinkron otomatis dimatikan.", false);
+            MongoSync.Config restored = MongoSync.load(this);
+            if (restored != null) {
+                // Build ini membawa endpoint bawaan, jadi "hapus" berarti kembali ke bawaan.
+                syncEndpointInput.setText(restored.endpoint.toString());
+                syncTokenInput.setText(restored.token);
+                MongoSync.setAutoEnabled(this, true);
+                suppressSyncToggle = true;
+                syncToggle.setChecked(true);
+                suppressSyncToggle = false;
+                MongoSyncScheduler.configure(this);
+                setSyncStatus("Kembali ke pengaturan bawaan. Sinkron otomatis aktif.", true);
+            } else {
+                syncEndpointInput.setText("");
+                syncTokenInput.setText("");
+                suppressSyncToggle = true;
+                syncToggle.setChecked(false);
+                suppressSyncToggle = false;
+                setSyncStatus("Alamat dan token dihapus. Sinkron otomatis dimatikan.", false);
+            }
         });
-        card.addView(clearButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+        advanced.addView(clearButton, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(46), 0, 6, 0, 0));
 
         MongoSync.Config config = MongoSync.load(this);
@@ -962,7 +994,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
             syncTokenInput.setText(config.token);
             refreshSyncStatus();
         } else {
-            setSyncStatus("Belum diatur. Isi endpoint dan token.", false);
+            setSyncStatus("Endpoint belum tertanam di build ini. Isi alamat dan token di atas.", false);
         }
         return card;
     }

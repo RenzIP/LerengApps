@@ -27,10 +27,12 @@ import javax.net.ssl.HttpsURLConnection;
 /**
  * Sinkron otomatis ke endpoint HTTPS milik pengguna.
  *
- * Aplikasi tidak pernah menyimpan URI MongoDB. Yang disimpan hanya alamat
- * endpoint dan token; server yang memegang kredensial basis data. Sinkron
- * berjalan otomatis saat ada data baru, saat aplikasi dibuka, dan berkala
- * lewat JobScheduler. Tidak ada tombol kirim.
+ * Aplikasi tidak pernah menyimpan URI MongoDB. Endpoint dan kunci aplikasi
+ * ditanam saat build (lihat gradle.properties) sehingga pengguna tidak perlu
+ * mengisi apa pun. Kunci itu ada di dalam APK, jadi bukan rahasia; server yang
+ * memegang kredensial basis data dan melakukan validasi serta pembatasan.
+ * Sinkron berjalan otomatis saat ada data baru, saat aplikasi dibuka, dan
+ * berkala lewat JobScheduler. Tidak ada tombol kirim.
  *
  * Pengiriman bersifat inkremental: tanda air per proyek menyimpan ID lokal
  * terakhir yang sudah terkirim, sehingga ribuan titik lama tidak dikirim ulang.
@@ -67,10 +69,17 @@ final class MongoSync {
 
     // ------------------------------------------------------------ pengaturan
 
+    /**
+     * Pengaturan efektif: nilai yang disimpan pengguna, atau nilai bawaan yang
+     * ditanam saat build. Karena bawaan sudah ada, aplikasi langsung tersambung
+     * tanpa isian apa pun.
+     */
     static Config load(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String endpoint = prefs.getString(KEY_ENDPOINT, "");
         String token = prefs.getString(KEY_TOKEN, "");
+        if (endpoint == null || endpoint.trim().isEmpty()) endpoint = BuildConfig.SYNC_ENDPOINT;
+        if (token == null || token.trim().isEmpty()) token = BuildConfig.SYNC_TOKEN;
         if (endpoint == null || endpoint.trim().isEmpty() || token == null || token.trim().isEmpty()) {
             return null;
         }
@@ -79,6 +88,11 @@ final class MongoSync {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /** True bila build ini membawa endpoint dan kunci bawaan. */
+    static boolean hasBuiltInTarget() {
+        return !BuildConfig.SYNC_ENDPOINT.trim().isEmpty() && !BuildConfig.SYNC_TOKEN.trim().isEmpty();
     }
 
     static Config save(Context context, String rawEndpoint, String rawToken) {

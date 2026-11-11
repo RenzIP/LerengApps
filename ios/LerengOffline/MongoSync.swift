@@ -93,13 +93,34 @@ enum MongoSync {
         UserDefaults.standard.set(enabled, forKey: autoKey)
     }
 
-    /// Konfigurasi siap pakai, atau `nil` bila alamat/token belum lengkap.
+    /// Konfigurasi siap pakai, atau `nil` bila alamat/kunci belum ada sama sekali.
+    /// Nilai yang disimpan pengguna menang; kalau kosong, dipakai nilai bawaan
+    /// yang ditanam saat build sehingga aplikasi langsung tersambung.
     static func currentConfig() -> Config? {
-        let rawEndpoint = UserDefaults.standard.string(forKey: endpointKey) ?? ""
-        let token = SyncTokenStore.load().trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpointText = effectiveEndpointString()
+        let token = effectiveToken()
         guard !token.isEmpty,
-              let endpoint = try? normalizeEndpoint(rawEndpoint) else { return nil }
+              let endpoint = try? normalizeEndpoint(endpointText) else { return nil }
         return Config(endpoint: endpoint, token: token)
+    }
+
+    /// True bila build ini membawa endpoint dan kunci bawaan.
+    static var hasBuiltInTarget: Bool {
+        !AppConfig.defaultSyncEndpoint.isEmpty && !AppConfig.defaultSyncToken.isEmpty
+    }
+
+    /// Alamat efektif: simpanan pengguna, atau bawaan.
+    static func effectiveEndpointString() -> String {
+        let stored = UserDefaults.standard.string(forKey: endpointKey) ?? ""
+        return stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? AppConfig.defaultSyncEndpoint
+            : stored
+    }
+
+    /// Kunci efektif: Keychain, atau bawaan.
+    static func effectiveToken() -> String {
+        let stored = SyncTokenStore.load().trimmingCharacters(in: .whitespacesAndNewlines)
+        return stored.isEmpty ? AppConfig.defaultSyncToken : stored
     }
 
     /// Penanda endpoint agar tanda air tidak tercampur bila alamat diganti.
