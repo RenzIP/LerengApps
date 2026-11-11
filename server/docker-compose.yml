@@ -1,0 +1,18 @@
+services:
+  ingest:
+    build:
+      context: .
+    image: lereng-ingest:1.0.0
+    container_name: lereng-ingest
+    restart: unless-stopped
+    ports:
+      # Hanya di localhost; akses dari luar lewat tunnel, bukan membuka port ke internet.
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

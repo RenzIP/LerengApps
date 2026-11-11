@@ -23,11 +23,63 @@ duplikat.
 
 1. Buat cluster gratis di <https://www.mongodb.com/atlas>.
 2. **Database Access** → tambah user dengan password kuat.
-3. **Network Access** → izinkan `0.0.0.0/0` (Vercel memakai IP dinamis).
-   Batasi dengan kredensial yang hanya bisa menulis ke satu database.
+3. **Network Access** → izinkan alamat server yang dipakai:
+   - Vercel: `0.0.0.0/0`, karena IP keluar Vercel berubah-ubah.
+   - Docker di rumah: cukup IP publik rumahmu (`whatismyip`), lebih ketat.
+     Kalau IP dari ISP berubah, sinkron akan gagal sampai daftar diperbarui.
+   Batasi juga dengan kredensial yang hanya bisa menulis ke satu database.
 4. Salin connection string `mongodb+srv://...`.
 
-## 2. Deploy ke Vercel
+## 2a. Jalankan dengan Docker (lokal)
+
+Cara ini tidak butuh akun Vercel. Kontrak ingest tetap satu: `api/ingest.js`
+dipakai apa adanya, dan `docker/serve.js` hanya menambahkan pembungkus HTTP.
+
+```bash
+cd server
+cp .env.example .env      # lalu isi MONGODB_URI
+docker compose up -d --build
+curl http://127.0.0.1:8080/health
+```
+
+`docker compose ps` harus menampilkan status `healthy`. Port sengaja diikat ke
+`127.0.0.1` supaya tidak terbuka ke jaringan lokal; akses dari HP lewat tunnel.
+
+Ganti isi `.env` lalu buat ulang container agar variabel terbaca:
+
+```bash
+docker compose up -d --force-recreate
+```
+
+Perintah harian:
+
+```bash
+docker compose logs -f ingest     # lihat log
+docker compose restart ingest     # mulai ulang
+docker compose down               # hentikan
+```
+
+### Konsekuensi menjalankan di rumah
+
+Server hanya hidup saat komputer menyala dan online. Kalau komputer mati,
+sinkron berhenti—tetapi data tetap aman di SQLite perangkat dan dikirim saat
+server kembali hidup. Untuk server yang selalu siap, pakai Vercel (bagian 2b).
+
+### Alamat HTTPS untuk HP
+
+HP tidak bisa memakai `http://127.0.0.1:8080`. Perlu tunnel HTTPS:
+
+| Cara | URL stabil | Catatan |
+| --- | --- | --- |
+| ngrok (akun gratis) | ya, satu domain statis | paling praktis untuk pemakaian rutin |
+| Cloudflare Tunnel | ya, butuh domain sendiri | paling rapi bila punya domain |
+| Pinggy lewat `ssh` | tidak, acak tiap sesi | tanpa instalasi apa pun |
+
+Kalau alamat endpoint berubah, aplikasi menganggapnya target baru dan mengirim
+seluruh riwayat sekali lagi. Dokumen tetap tidak berganda karena `_id` stabil,
+tetapi sebaiknya pakai URL yang tidak berubah.
+
+## 2b. Deploy ke Vercel
 
 ```bash
 cd server

@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+.vercel/
+*.log
+Dockerfile
+docker-compose.yml
+README.md
