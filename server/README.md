@@ -79,6 +79,22 @@ Kalau alamat endpoint berubah, aplikasi menganggapnya target baru dan mengirim
 seluruh riwayat sekali lagi. Dokumen tetap tidak berganda karena `_id` stabil,
 tetapi sebaiknya pakai URL yang tidak berubah.
 
+### Menjaga tetap hidup (Windows)
+
+Tiga hal harus hidup bersamaan: Docker Desktop, container `lereng-ingest`, dan
+`cloudflared`. Satu skrip idempoten yang dipanggil Windows Task Scheduler tiap
+5 menit cukup untuk ketiganya: skrip menyalakan yang mati dan tidak menyentuh
+yang sudah jalan. Pasang task-nya sekali:
+
+```powershell
+schtasks /Create /TN "Lereng Offline Stack" `
+  /TR 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\path\autostart.ps1"' `
+  /SC MINUTE /MO 5 /RL LIMITED /F
+```
+
+Aktifkan juga **Start Docker Desktop when you sign in** di pengaturan Docker,
+supaya container ikut hidup setelah reboot.
+
 ## 2b. Deploy ke Vercel
 
 ```bash
