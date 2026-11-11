@@ -1,17 +1,17 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 14,
-  "versionName": "2.5.5",
+  "versionCode": 15,
+  "versionName": "2.5.6",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.5/LerengOffline-2.5.5.apk",
-  "sizeBytes": 2865518,
-  "sha256": "e65021955e92089bdfd0c8325a4f62444641b67c8a5ede31214c59a7e8e2f16d",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.6/LerengOffline-2.5.6.apk",
+  "sizeBytes": 2704745,
+  "sha256": "32b875d2a5d4ce5dcc9e45b73b5d1a65f79b14ee0f8b79d4456678183f4c4e39",
   "notes": [
-    "Sinkron otomatis ke MongoDB untuk semua proyek, tanpa tombol kirim",
-    "Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek",
-    "Sinkron berkala lewat JobScheduler dan saat aplikasi dibuka; tanpa internet data menunggu",
-    "Pengiriman inkremental dan idempoten; jalur pembanding GPX tidak ikut"
+    "Sinkron otomatis langsung aktif: endpoint dan kunci aplikasi sudah tertanam, tidak ada isian apa pun",
+    "Tab Data tidak lagi meminta alamat atau token; pengaturan lanjutan tetap tersedia bila perlu",
+    "Kunci aplikasi bukan rahasia; server membatasi laju 120 permintaan per menit per IP",
+    "Rekaman offline tetap berjalan dan data dikirim sendiri saat koneksi kembali"
   ],
-  "publishedAt": "2026-11-11T04:12:00Z"
+  "publishedAt": "2026-11-11T06:10:00Z"
 }
