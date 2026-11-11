@@ -86,11 +86,29 @@ tetapi sebaiknya pakai URL yang tidak berubah.
 Tiga hal harus hidup bersamaan: Docker Desktop, container `lereng-ingest`, dan
 `cloudflared`. Satu skrip idempoten yang dipanggil Windows Task Scheduler tiap
 5 menit cukup untuk ketiganya: skrip menyalakan yang mati dan tidak menyentuh
-yang sudah jalan. Pasang task-nya sekali:
+yang sudah jalan.
+
+Jalankan lewat pembungkus VBS, **bukan** langsung `powershell.exe`. Windows
+selalu membuat jendela konsol untuk `powershell.exe` sebelum sempat
+menyembunyikannya, sehingga layar berkedip tiap 5 menit. `wscript.exe` adalah
+aplikasi GUI, jadi tidak ada konsol yang dibuat sama sekali.
+
+`run-hidden.vbs`:
+
+```vbscript
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""C:\path\autostart.ps1""", 0, True
+```
+
+`0` = jendela tersembunyi, `True` = tunggu sampai skrip selesai. Menunggu itu
+penting: Task Scheduler mematikan proses anak begitu tugas dianggap selesai, dan
+tanpa penantian skrip bisa terhenti saat menunggu mesin Docker siap.
+
+Pasang task-nya sekali:
 
 ```powershell
 schtasks /Create /TN "Lereng Offline Stack" `
-  /TR 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\path\autostart.ps1"' `
+  /TR 'wscript.exe //B //Nologo "C:\path\run-hidden.vbs"' `
   /SC MINUTE /MO 5 /RL LIMITED /F
 ```
 
