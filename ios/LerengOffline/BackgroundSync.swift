@@ -16,7 +16,7 @@ enum BackgroundSync {
             schedule()
             let work = Task { @MainActor in
                 await model.performSync()
-                refresh.setTaskCompleted(success: true)
+                if !Task.isCancelled { refresh.setTaskCompleted(success: true) }
             }
             refresh.expirationHandler = { work.cancel() }
         }

@@ -4,6 +4,7 @@ import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.content.ComponentName;
 import android.content.Context;
+import android.os.SystemClock;
 
 /**
  * Penjadwal sinkron otomatis. Tidak butuh WorkManager/AndroidX: JobScheduler
@@ -13,6 +14,8 @@ final class MongoSyncScheduler {
     static final int JOB_PERIODIC = 4101;
     static final int JOB_NOW = 4102;
     static final long PERIOD_MS = 15L * 60L * 1000L;
+    private static final long DEBOUNCE_MS = 45_000L;
+    private static long lastDebouncedAt = 0;
 
     private MongoSyncScheduler() {}
 
@@ -45,9 +48,15 @@ final class MongoSyncScheduler {
      */
     static void requestSync(Context context, long delayMs) {
         if (!isReady(context)) return;
+        long delay = Math.max(0, delayMs);
+        // Permintaan beruntun dari refresh UI tidak boleh menunda job terus-menerus.
+        if (delay > 0) {
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastDebouncedAt < DEBOUNCE_MS) return;
+            lastDebouncedAt = now;
+        }
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler == null) return;
-        long delay = Math.max(0, delayMs);
         JobInfo.Builder builder = new JobInfo.Builder(JOB_NOW,
                 new ComponentName(context, MongoSyncJobService.class))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
