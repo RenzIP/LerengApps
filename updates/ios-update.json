@@ -1,14 +1,14 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 1,
-  "version": "1.0.0",
+  "build": 2,
+  "version": "1.1.0",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.0.0",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.1.0",
   "notes": [
-    "Rilis awal iOS: rekam jalur offline, waypoint, ekspor CSV/GPX/GeoJSON/JSONL",
-    "Kehadiran BLE hanya bertukar ID samaran dan waktu",
+    "iPhone dapat mendeteksi kehadiran teman yang memakai Android (manufacturer data 0xFFFF)",
+    "Ikon aplikasi Lereng Offline",
     "IPA tanpa tanda tangan untuk dipasang dengan Sideloadly/AltStore"
   ],
-  "publishedAt": "2026-11-10T00:00:00Z"
+  "publishedAt": "2026-11-11T00:00:00Z"
 }
