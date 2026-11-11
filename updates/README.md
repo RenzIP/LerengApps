@@ -12,8 +12,9 @@ manifes JSON → tautan APK HTTPS → pemasang paket Android.
 
 - **Fail-open.** Offline, DNS gagal, TLS gagal, HTTP error, atau JSON rusak → aplikasi tetap
   berjalan normal. Pemeriksaan wajib tidak pernah mengunci aplikasi saat tidak ada jaringan.
-- **Tidak ada data pengguna yang dikirim.** Hanya `GET` satu berkas JSON. Tidak ada ID perangkat,
-  lokasi, atau track yang ikut. Header hanya `User-Agent: LerengOffline/<versi>`.
+- **Pemeriksaan pembaruan tidak mengirim data pengguna.** Hanya `GET` satu berkas JSON. Tidak ada ID perangkat,
+  lokasi, atau track yang ikut. Header hanya `User-Agent: LerengOffline/<versi>`. (Sinkron MongoDB adalah
+  fitur terpisah yang hanya berjalan setelah endpoint dan token diisi.)
 - **HTTPS saja.** Manifes dan tautan APK harus `https://`; pengalihan ke non-HTTPS ditolak.
 - **Batas ukuran.** Manifes maksimal 64 KB dan dibaca dengan timeout 7 detik.
 - **Nonaktif secara bawaan.** Jika `lerengUpdateUrl` kosong saat build, APK tidak menghubungi
@@ -148,9 +149,8 @@ lembar pembaruan membuka halaman GitHub Release.
 | `downloadUrl` / `appStoreUrl` / `testFlightUrl` | ya (salah satu) | Harus HTTPS. Urutan prioritas: `downloadUrl`, lalu `appStoreUrl`, lalu `testFlightUrl`. |
 | `notes` | tidak | String atau array string. |
 
-Manifes yang dipublikasikan sekarang memakai `build: 1`, sama dengan build aplikasi, jadi tidak
-ada dialog yang muncul. Naikkan `build` (dan `CURRENT_PROJECT_VERSION` di `ios/project.yml`)
-saat merilis IPA baru.
+Manifes yang dipublikasikan sekarang memakai `build: 5` untuk iOS 1.4.0. Naikkan `build` (dan
+`CURRENT_PROJECT_VERSION` di `ios/project.yml`) saat merilis IPA baru.
 
 ### Rilis IPA tanpa tanda tangan
 

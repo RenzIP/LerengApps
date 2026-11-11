@@ -1,17 +1,17 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 13,
-  "versionName": "2.5.4",
+  "versionCode": 14,
+  "versionName": "2.5.5",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.4/LerengOffline-2.5.4.apk",
-  "sizeBytes": 2701845,
-  "sha256": "79355e87d18b9a04e2ddd2df24a7737025b698ef4bd24cb5bb147d7c4455c45f",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.5/LerengOffline-2.5.5.apk",
+  "sizeBytes": 2865518,
+  "sha256": "e65021955e92089bdfd0c8325a4f62444641b67c8a5ede31214c59a7e8e2f16d",
   "notes": [
-    "Tombol Kirim ke MongoDB: semua data proyek dikirim manual ke endpoint HTTPS milikmu",
-    "Tidak ada unggahan otomatis; jalur pembanding GPX tidak ikut",
-    "Endpoint dan token disimpan di perangkat; server memegang URI MongoDB",
-    "Kirim ulang tidak menggandakan data karena setiap Fitur punya ID stabil"
+    "Sinkron otomatis ke MongoDB untuk semua proyek, tanpa tombol kirim",
+    "Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek",
+    "Sinkron berkala lewat JobScheduler dan saat aplikasi dibuka; tanpa internet data menunggu",
+    "Pengiriman inkremental dan idempoten; jalur pembanding GPX tidak ikut"
   ],
-  "publishedAt": "2026-11-11T03:27:58Z"
+  "publishedAt": "2026-11-11T04:12:00Z"
 }

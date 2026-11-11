@@ -1,15 +1,15 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 3,
-  "version": "1.2.0",
+  "build": 5,
+  "version": "1.4.0",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.2.0",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.0",
   "notes": [
-    "Akurasi lokasi ditingkatkan (best-for-navigation) dan titik di atas 30 m tidak disimpan",
-    "Impor GPX pembanding dari ekspor Strava/app lain, digambar putus-putus",
-    "Jalur pembanding disimpan terpisah dan tidak ikut diekspor",
-    "IPA tanpa tanda tangan untuk dipasang dengan Sideloadly/AltStore"
+    "Sinkron otomatis ke MongoDB untuk semua proyek, tanpa tombol kirim",
+    "Data baru dikirim sendiri saat ada titik, waypoint, presence BLE, atau perubahan proyek",
+    "Sinkron saat aplikasi aktif dan lewat BGAppRefreshTask bila iOS mengizinkan",
+    "Pengiriman inkremental dan idempoten; jalur pembanding GPX tidak ikut"
   ],
-  "publishedAt": "2026-11-11T02:58:48Z"
+  "publishedAt": "2026-11-11T04:25:00Z"
 }
