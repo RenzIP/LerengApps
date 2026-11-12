@@ -118,7 +118,7 @@ hanya memahami bentuk 10 byte, jadi Android→iOS baru terlihat setelah aplikasi
   pembaruan menampilkan tombol "Buka halaman unduhan".
 - `appStoreUrl`/`testFlightUrl` tetap didukung bila kelak aplikasi terbit di toko Apple.
 - Manifest yang dipublikasikan memakai nomor build yang sama dengan build aplikasi yang
-  beredar (saat ini `build: 7` untuk versi 1.4.2), sehingga tidak menampilkan dialog apa pun
+  beredar (saat ini `build: 8` untuk versi 1.4.3), sehingga tidak menampilkan dialog apa pun
   sampai ada build yang lebih baru. Naikkan nomor build di `project.yml` dan di manifest
   bersamaan agar pengguna lama melihat tawaran pembaruan.
 

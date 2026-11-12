@@ -1,16 +1,15 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 7,
-  "version": "1.4.2",
+  "build": 8,
+  "version": "1.4.3",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.2",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.3",
   "notes": [
-    "Impor CSV dan GPX dari aplikasi lain langsung ke proyek aktif, lengkap dengan waypoint dan kehadiran BLE",
-    "GPX kini membaca <trkpt>, <rtept>, dan <wpt>; duplikat waktu dan koordinat diabaikan",
-    "Peringatan muncul bila tidak ada titik baru lebih dari 2 menit, jadi GPS yang belum fix terlihat jelas",
-    "Layar tidak lagi tersendat saat merekam: pembacaan data dan ekspor berjalan di latar",
-    "Status jaringan tampil di layar Rekam, dan tombol Mulai menampilkan keadaan Memulai…"
+    "Interval kontur kini bisa dipilih: 5 m, 10 m (bawaan), 20 m, Otomatis, atau angka sendiri 1-200 m",
+    "Grafik profil digambar ulang dengan pita elevasi dan garis kontur setiap interval, lengkap dengan label elevasi",
+    "Pilihan interval disimpan lintas sesi dan mengikuti interval yang sama seperti Android",
+    "Grafik menampilkan jarak tempuh, nilai terendah, dan nilai tertinggi agar mudah dibaca tanpa legenda"
   ],
-  "publishedAt": "2026-11-12T04:00:00Z"
+  "publishedAt": "2026-11-12T02:00:00Z"
 }
