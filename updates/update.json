@@ -1,22 +1,19 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 17,
-  "versionName": "2.5.8",
+  "versionCode": 18,
+  "versionName": "2.5.9",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.8/LerengOffline-2.5.8.apk",
-  "sizeBytes": 2709645,
-  "sha256": "ba0e4b58f92125e5805e45184027414dbd009970a40e52fdaaebb615224c94a0",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.5.9/LerengOffline-2.5.9.apk",
+  "sizeBytes": 2717269,
+  "sha256": "ec7766f2ed2f47c270532ab32991bc9ff22c4610ac55b16111a54edf25d9eae2",
   "notes": [
-    "Merekam tidak lagi tersendat: data layar dibaca di latar belakang dan digabung, bukan di UI thread setiap titik",
-    "Status jaringan memakai satu sumber: label chip konsisten dan teks lama yang menyatakan track tidak diunggah otomatis sudah dihapus",
-    "Peringatan GPS tidak memberi titik atau gagal mulai bertahan 2 menit, tidak lagi tertimpa status tiap 5 detik",
-    "Tombol bawah menampilkan Memulai… dan tidak bisa ditekan selama layanan belum aktif, bukan mengaku Hentikan",
-    "Ekspor dan impor CSV/GPX berjalan di latar belakang sehingga proyek besar tidak membekukan layar",
-    "Ekspor tetap tercatat pada proyek yang benar walaupun kamu berpindah proyek saat file sedang ditulis",
-    "Teks cadangan tidak lagi bertentangan dengan sinkron otomatis ke MongoDB",
-    "Judul kartu, statistik, dan header tidak terpotong saat ukuran font diperbesar",
-    "Terrain tidak kosong bila dataset elevasi terhapus di tengah perhitungan, dan teks menghitung tidak berkedip tiap titik"
+    "Interval kontur bisa dipilih: 5 m, 10 m (bawaan), 20 m, Otomatis, atau angka sendiri 1-200 m; pilihan disimpan lintas proyek",
+    "Tampilan kontur dirombak: peta kontur area 2D dengan pita warna dan label elevasi, relief 3D, serta profil kontur sepanjang jalur saat area belum terbentuk",
+    "Kontur tidak lagi hilang saat level kontur persis sama dengan elevasi simpul; celah di sudut grid diperbaiki",
+    "Interpolasi tidak lagi terlalu ketat: minimal empat tetangga di tiga kuadran, sehingga jalur membelok tidak lagi menghasilkan nol sel",
+    "Ambang tampilan area diturunkan ke 6 sel dan 15 persen coverage; garis kontur parsial tetap digambar",
+    "Teks status dan bantuan memakai bahasa Indonesia yang lebih jelas tentang apa yang terukur dan apa yang tidak"
   ],
-  "publishedAt": "2026-11-11T13:30:00Z"
+  "publishedAt": "2026-11-12T00:00:00Z"
 }
