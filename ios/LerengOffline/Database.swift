@@ -265,7 +265,7 @@ final class Database {
 
     func points(surveyId: Int64) -> [TrackPoint] {
         lock.lock(); defer { lock.unlock() }
-        loadPoints(sql: """
+        return loadPoints(sql: """
         SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
                source, label, participant_id, participant_alias, group_code, is_waypoint
         FROM points WHERE survey_id = ? ORDER BY time_ms
@@ -275,7 +275,7 @@ final class Database {
     /// Titik dengan `_id` di atas tanda air; dipakai sinkron otomatis.
     func points(surveyId: Int64, after id: Int64) -> [TrackPoint] {
         lock.lock(); defer { lock.unlock() }
-        loadPoints(sql: """
+        return loadPoints(sql: """
         SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
                source, label, participant_id, participant_alias, group_code, is_waypoint
         FROM points WHERE survey_id = ? AND _id > ? ORDER BY _id
@@ -284,7 +284,7 @@ final class Database {
 
     func maxPointId(surveyId: Int64) -> Int64 {
         lock.lock(); defer { lock.unlock() }
-        maxId(table: "points", surveyId: surveyId)
+        return maxId(table: "points", surveyId: surveyId)
     }
 
     private func loadPoints(sql: String, arguments: [SQLValue]) -> [TrackPoint] {
@@ -346,7 +346,7 @@ final class Database {
 
     func presence(surveyId: Int64) -> [Presence] {
         lock.lock(); defer { lock.unlock() }
-        loadPresence(sql: """
+        return loadPresence(sql: """
         SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
         FROM presence WHERE survey_id = ? ORDER BY time_ms
         """, arguments: [.int(surveyId)])
@@ -355,7 +355,7 @@ final class Database {
     /// Event presence dengan `_id` di atas tanda air; dipakai sinkron otomatis.
     func presence(surveyId: Int64, after id: Int64) -> [Presence] {
         lock.lock(); defer { lock.unlock() }
-        loadPresence(sql: """
+        return loadPresence(sql: """
         SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
         FROM presence WHERE survey_id = ? AND _id > ? ORDER BY _id
         """, arguments: [.int(surveyId), .int(max(0, id))])
@@ -363,7 +363,7 @@ final class Database {
 
     func maxPresenceId(surveyId: Int64) -> Int64 {
         lock.lock(); defer { lock.unlock() }
-        maxId(table: "presence", surveyId: surveyId)
+        return maxId(table: "presence", surveyId: surveyId)
     }
 
     private func loadPresence(sql: String, arguments: [SQLValue]) -> [Presence] {
