@@ -103,14 +103,14 @@ struct ProfileView: View {
 
     private var privacySection: some View {
         Section {
-            Label("Data tetap di perangkat ini", systemImage: "lock.shield")
-            Label("Tidak ada sinkronisasi awan otomatis", systemImage: "icloud.slash")
+            Label("Rekaman tersimpan di perangkat ini", systemImage: "lock.shield")
+            Label("Sinkron otomatis ke server milik sendiri", systemImage: "arrow.triangle.2.circlepath")
             Label("Elevasi tidak dikonversi antar datum", systemImage: "ruler")
-            Label("Ekspor hanya lewat lembar berbagi sistem", systemImage: "square.and.arrow.up")
+            Label("Ekspor lokal lewat lembar berbagi sistem", systemImage: "square.and.arrow.up")
         } header: {
-            Text("Privasi")
+            Text("Data dan privasi")
         } footer: {
-            Text("Satu-satunya permintaan jaringan adalah berkas JSON kecil untuk memeriksa pembaruan. Bila gagal, aplikasi tetap bekerja.")
+            Text("Titik, waypoint, kehadiran BLE, dan metadata proyek dikirim sendiri ke endpoint HTTPS yang sudah tertanam di aplikasi. Bila jaringan tidak ada, data menunggu di perangkat dan dikirim saat koneksi kembali. Jalur pembanding GPX tidak pernah dikirim.")
         }
     }
 
@@ -142,7 +142,7 @@ struct ProfileView: View {
         } header: {
             Text("Pembaruan")
         } footer: {
-            Text("Pemeriksaan otomatis berjalan paling sering setiap 6 jam. Pembaruan wajib memakai dialog yang tidak dapat ditutup sampai aplikasi diperbarui lewat App Store.")
+            Text("Pemeriksaan otomatis berjalan paling sering setiap 6 jam. Pembaruan dipasang manual lewat Sideloadly/AltStore karena aplikasi tidak disebar melalui App Store; dialog wajib tidak dapat ditutup sampai aplikasi diperbarui.")
         }
     }
 

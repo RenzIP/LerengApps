@@ -39,6 +39,42 @@ enum ExportKind {
     }
 }
 
+/// GPX yang sudah dibaca tetapi belum ditulis ke proyek. Pengguna memilih
+/// referensi elevasi lebih dulu; tidak ada konversi nilai.
+struct PendingTrackImport: Identifiable {
+    let id = UUID()
+    let name: String
+    let creator: String
+    let declaredReference: String
+    let points: [GpxTrackParser.ParsedPoint]
+    let skipped: Int
+
+    var trackCount: Int { points.filter { !$0.isWaypoint }.count }
+    var waypointCount: Int { points.filter { $0.isWaypoint }.count }
+    var hasElevation: Bool { points.contains { $0.elevation != nil } }
+    var hasTime: Bool { points.contains { $0.time != nil } }
+
+    var summary: String {
+        var text = "\(trackCount) titik track dan \(waypointCount) waypoint dibaca"
+        if !creator.isEmpty { text += " (dibuat oleh \(creator))" }
+        text += "."
+        if skipped > 0 {
+            text += " \(skipped) baris dilewati karena koordinat tidak valid."
+        }
+        if !hasTime {
+            text += " File tanpa waktu: urutan file dipakai sebagai waktu relatif."
+        }
+        text += "\n\nPilih referensi elevasi file ini. Aplikasi tidak mengonversi elevasi; "
+        text += "label hanya dicatat agar profil dan terrain tidak mencampur datum."
+        if !declaredReference.isEmpty,
+           declaredReference.lowercased() != ImportDatum.unrecorded {
+            text += "\n\nFile mencantumkan referensi: “\(declaredReference)”. Verifikasi sebelum memilih."
+        }
+        text += "\n\nDuplikat (waktu + koordinat sama) diabaikan."
+        return text
+    }
+}
+
 /// Keadaan aplikasi. Semua data berada pada SQLite lokal di folder dokumen aplikasi.
 final class AppModel: ObservableObject {
     let database: Database
@@ -50,8 +86,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var presence: [Presence] = []
     @Published private(set) var referenceTrack: ReferenceTrack?
     @Published private(set) var referencePoints: [ReferencePoint] = []
+    @Published private(set) var trackPointCount = 0
+    @Published private(set) var networkState: NetworkMonitor.State = .unknown
     @Published var pendingReferenceImport: PendingReferenceImport?
+    @Published var pendingTrackImport: PendingTrackImport?
     @Published var isRecording = false
+    @Published var isStarting = false
+    @Published var isImporting = false
+    @Published var isExporting = false
     @Published var statusText = "Siap merekam"
     @Published var exportItem: ExportItem?
     @Published var syncEndpoint = MongoSync.effectiveEndpointString()
@@ -67,14 +109,30 @@ final class AppModel: ObservableObject {
 
     private var bag = Set<AnyCancellable>()
     private var lastPointTime: Int64 = 0
+    private var lastFixAt: Date?
+    private var watchdog: Timer?
     private var lastAutoCheck: Date?
     private var scheduledSync: DispatchWorkItem?
     private var syncTask: Task<Void, Never>?
+
+    private let network = NetworkMonitor()
+    /// Pembacaan data layar berjalan di sini supaya perekaman tidak tersendat.
+    private let snapshotQueue = DispatchQueue(label: "id.bagas.lerengoffline.snapshot",
+                                              qos: .userInitiated)
+    /// Ekspor dan impor berkas berjalan di sini agar layar tidak membeku.
+    private let ioQueue = DispatchQueue(label: "id.bagas.lerengoffline.io",
+                                        qos: .userInitiated)
+    private var refreshWork: DispatchWorkItem?
+    private var snapshotGeneration: UInt64 = 0
+    /// Jeda singkat untuk menggabungkan beberapa permintaan beruntun.
+    private static let refreshDebounce: TimeInterval = 0.12
 
     private let autoCheckInterval: TimeInterval = 6 * 60 * 60
 
     /// Titik dengan akurasi horizontal di atas nilai ini tidak disimpan.
     static let maxHorizontalAccuracyMeters = 30.0
+    /// Peringatan "tidak ada fix" muncul setelah selama ini tanpa titik baru.
+    private static let fixStallSeconds: TimeInterval = 120
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -82,6 +140,7 @@ final class AppModel: ObservableObject {
 
         let surveyId = database.ensureDefaultSurvey()
         survey = database.survey(surveyId)
+        trackPointCount = database.points(surveyId: surveyId).filter { !$0.isWaypoint }.count
         refresh()
 
         recorder.onFix = { [weak self] location in self?.handle(location) }
@@ -94,6 +153,13 @@ final class AppModel: ObservableObject {
         ble.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &bag)
+        recorder.$authorizationStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in self?.handleAuthorization(status) }
+            .store(in: &bag)
+
+        network.onChange = { [weak self] state in self?.networkState = state }
+        network.start()
     }
 
     // MARK: - Data
@@ -114,40 +180,65 @@ final class AppModel: ObservableObject {
         return last.time - first.time
     }
 
+    /// Meminta penyegaran layar. Pembacaan basis data berjalan di antrean latar,
+    /// lalu hasilnya dipasang di main thread. Permintaan beruntun digabung.
     func refresh() {
-        guard let survey else {
+        guard survey != nil else {
             points = []
             presence = []
             referenceTrack = nil
             referencePoints = []
+            trackPointCount = 0
             return
         }
-        points = database.points(surveyId: survey.id)
-        presence = database.presence(surveyId: survey.id)
-        refreshReference()
+        refreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.readSnapshot() }
+        refreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.refreshDebounce, execute: work)
+    }
+
+    private func readSnapshot() {
+        guard let survey else { return }
+        let surveyId = survey.id
+        snapshotGeneration &+= 1
+        let generation = snapshotGeneration
+
+        snapshotQueue.async { [weak self] in
+            guard let self else { return }
+            let loadedPoints = self.database.points(surveyId: surveyId)
+            let loadedPresence = self.database.presence(surveyId: surveyId)
+            let track = self.database.referenceTrack(surveyId: surveyId)
+            let loadedReference = track == nil
+                ? [] : self.database.referencePoints(surveyId: surveyId)
+            DispatchQueue.main.async {
+                guard generation == self.snapshotGeneration,
+                      self.survey?.id == surveyId else { return }
+                self.points = loadedPoints
+                self.presence = loadedPresence
+                self.referenceTrack = track
+                self.referencePoints = loadedReference
+                self.trackPointCount = loadedPoints.filter { !$0.isWaypoint }.count
+            }
+        }
     }
 
     private func refreshReference() {
-        guard let survey else {
-            referenceTrack = nil
-            referencePoints = []
-            return
-        }
-        let track = database.referenceTrack(surveyId: survey.id)
-        referenceTrack = track
-        referencePoints = track == nil ? [] : database.referencePoints(surveyId: survey.id)
+        refresh()
     }
 
     // MARK: - Rekaman
 
     func startRecording() {
-        guard survey != nil else { return }
+        guard survey != nil, !isRecording, !isStarting else { return }
         if identityReady, let survey {
             ble.start(groupCode: survey.groupCode, participantId: survey.participantId)
         }
         lastPointTime = points.last?.time ?? 0
+        trackPointCount = points.filter { !$0.isWaypoint }.count
+        lastFixAt = Date()
         recorder.start()
         isRecording = true
+        isStarting = !recorder.isRunning
         switch recorder.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             statusText = "Merekam; menunggu fix GNSS"
@@ -156,19 +247,66 @@ final class AppModel: ObservableObject {
         default:
             statusText = "Izin lokasi belum aktif; rekaman belum berjalan"
         }
+        startWatchdog()
+        guard isStarting else { return }
+        // Jaring pengaman: jangan biarkan tombol terkunci bila sistem tidak
+        // pernah menyalakan pembaruan lokasi.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self, self.isStarting else { return }
+            self.isStarting = false
+            guard !self.recorder.isRunning else { return }
+            switch self.recorder.authorizationStatus {
+            case .denied, .restricted:
+                self.isRecording = false
+                self.stopWatchdog()
+                self.statusText = "Perekaman tidak dapat dimulai: izin lokasi belum diberikan. "
+                    + "Aktifkan di Pengaturan → Lereng Offline → Lokasi."
+            case .notDetermined:
+                self.statusText = "Menunggu izin lokasi. Rekaman berjalan setelah izin diberikan."
+            default:
+                self.statusText = "Perekaman belum aktif: menunggu sumber lokasi. "
+                    + "Periksa izin lokasi presisi dan pastikan GPS aktif."
+            }
+        }
     }
 
     func stopRecording() {
+        guard isRecording else { return }
         recorder.stop()
         ble.stop()
         isRecording = false
-        statusText = "Rekaman berhenti"
+        isStarting = false
+        stopWatchdog()
+        statusText = "Rekaman berhenti. Data yang sudah tersimpan tetap ada di proyek ini."
         refresh()
         scheduleSync(delay: 1, force: true)
     }
 
     func requestLocationPermission() {
         recorder.requestPermission()
+    }
+
+    private func handleAuthorization(_ status: CLAuthorizationStatus) {
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            if isRecording {
+                recorder.start()
+                if !isStarting {
+                    statusText = "Merekam; menunggu fix GNSS"
+                }
+            }
+        case .denied, .restricted:
+            guard isRecording else { return }
+            recorder.stop()
+            ble.stop()
+            isRecording = false
+            isStarting = false
+            stopWatchdog()
+            statusText = "Izin lokasi ditolak. Rekaman belum berjalan; "
+                + "aktifkan di Pengaturan → Lereng Offline → Lokasi."
+        default:
+            break
+        }
     }
 
     private func handle(_ location: CLLocation) {
@@ -183,6 +321,7 @@ final class AppModel: ObservableObject {
         let time = Int64(location.timestamp.timeIntervalSince1970 * 1000)
         guard time > lastPointTime else { return }
         lastPointTime = time
+        lastFixAt = Date()
 
         let verticalAccuracy = location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil
         let altitude = verticalAccuracy == nil ? nil : location.altitude
@@ -203,8 +342,9 @@ final class AppModel: ObservableObject {
                              groupCode: survey.groupCode,
                              isWaypoint: false)
         _ = database.insertPoint(point)
+        trackPointCount += 1
+        statusText = "Merekam • \(trackPointCount) titik"
         refresh()
-        statusText = "Merekam • \(points.filter { !$0.isWaypoint }.count) titik"
         scheduleSync()
     }
 
@@ -259,8 +399,35 @@ final class AppModel: ObservableObject {
                                     observer: survey.participantId.uppercased(),
                                     seen: peer,
                                     groupCode: survey.groupCode)
-        presence = database.presence(surveyId: survey.id)
+        refresh()
         scheduleSync()
+    }
+
+    // MARK: - Pengawas fix
+
+    private func startWatchdog() {
+        stopWatchdog()
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            self?.checkFixWatchdog()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdog = timer
+    }
+
+    private func stopWatchdog() {
+        watchdog?.invalidate()
+        watchdog = nil
+    }
+
+    private func checkFixWatchdog() {
+        guard isRecording else {
+            stopWatchdog()
+            return
+        }
+        let last = lastFixAt ?? Date()
+        guard Date().timeIntervalSince(last) > Self.fixStallSeconds else { return }
+        statusText = "Belum ada titik baru lebih dari 2 menit. GPS mungkin belum mendapat fix: "
+            + "coba area terbuka, atau periksa apakah GPS aktif dan izin lokasi masih diberikan."
     }
 
     // MARK: - Identitas outing
@@ -318,6 +485,7 @@ final class AppModel: ObservableObject {
         database.deletePoints(surveyId: survey.id)
         database.deletePresence(surveyId: survey.id)
         lastPointTime = 0
+        trackPointCount = 0
         refresh()
     }
 
@@ -329,7 +497,7 @@ final class AppModel: ObservableObject {
         do {
             let result = try GpxReferenceParser.parse(url: url)
             guard !result.points.isEmpty else {
-                alertMessage = "GPX terbaca, tetapi tidak ada <trkpt> dengan koordinat valid."
+                alertMessage = "GPX terbaca, tetapi tidak ada <trkpt> atau <rtept> dengan koordinat valid."
                     + (result.skipped > 0 ? "\n\n\(result.skipped) baris dilewati karena koordinat tidak valid." : "")
                 return
             }
@@ -372,10 +540,108 @@ final class AppModel: ObservableObject {
         refreshReference()
     }
 
+    // MARK: - Impor ke proyek
+
+    /// Membaca GPX rekaman di latar. Pengguna memilih referensi elevasi lebih
+    /// dulu; tidak ada yang ditulis sebelum dikonfirmasi.
+    func importTrackGPX(from url: URL) {
+        guard survey != nil, !isImporting else { return }
+        isImporting = true
+        let fileName = url.deletingPathExtension().lastPathComponent
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try GpxTrackParser.parse(url: url)
+                DispatchQueue.main.async {
+                    self.isImporting = false
+                    guard !result.points.isEmpty else {
+                        self.alertMessage = "GPX terbaca, tetapi tidak ada <trkpt>, <rtept>, atau <wpt> "
+                            + "dengan koordinat valid."
+                            + (result.skipped > 0
+                               ? "\n\n\(result.skipped) baris dilewati karena koordinat tidak valid." : "")
+                        return
+                    }
+                    self.pendingTrackImport = PendingTrackImport(
+                        name: fileName,
+                        creator: result.creator,
+                        declaredReference: result.declaredReference,
+                        points: result.points,
+                        skipped: result.skipped)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isImporting = false
+                    self.alertMessage = "Impor GPX gagal. Pilih file GPX 1.1 yang valid (akar <gpx>). "
+                        + "Tidak ada data yang diubah.\n\n\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func cancelTrackImport() {
+        pendingTrackImport = nil
+    }
+
+    func confirmTrackImport(datum: String) {
+        guard let pending = pendingTrackImport, let survey else {
+            pendingTrackImport = nil
+            return
+        }
+        pendingTrackImport = nil
+        isImporting = true
+        let identity = survey
+        let importStart = Int64(Date().timeIntervalSince1970 * 1000)
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            let message = GpxImporter.run(pending: pending, survey: identity, datum: datum,
+                                          importStart: importStart, database: self.database)
+            DispatchQueue.main.async {
+                self.isImporting = false
+                self.refresh()
+                self.scheduleSync(delay: 1, force: true)
+                self.alertMessage = message
+            }
+        }
+    }
+
+    /// Membaca CSV hasil ekspor Lereng Offline atau tabel latitude/longitude.
+    func importCSV(from url: URL) {
+        guard let survey, !isImporting else { return }
+        isImporting = true
+        let identity = survey
+        let fileName = url.deletingPathExtension().lastPathComponent
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let message = try CsvImporter.run(data: data, fileName: fileName,
+                                                  survey: identity, database: self.database)
+                DispatchQueue.main.async {
+                    self.isImporting = false
+                    self.refresh()
+                    self.scheduleSync(delay: 1, force: true)
+                    self.alertMessage = message
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isImporting = false
+                    self.alertMessage = "Impor CSV gagal. Pilih CSV hasil ekspor Lereng Offline "
+                        + "atau tabel dengan latitude, longitude, elevation_m.\n\n"
+                        + error.localizedDescription
+                }
+            }
+        }
+    }
+
     // MARK: - Ekspor
 
+    /// Menyusun dan menulis berkas di antrean latar. Data yang diekspor
+    /// diambil dari snapshot saat tombol ditekan, bukan dari proyek yang
+    /// mungkin berganti di tengah proses.
     func export(_ kind: ExportKind) {
-        guard let survey else { return }
+        guard let survey, !isExporting else { return }
         let context = ExportContext(project: survey.name,
                                     points: points,
                                     presence: presence,
@@ -383,35 +649,44 @@ final class AppModel: ObservableObject {
                                     participantId: survey.participantId,
                                     participantAlias: survey.participantAlias,
                                     appVersion: AppConfig.version)
-        let payload: String
-        switch kind {
-        case .csv: payload = Exporters.csv(context)
-        case .gpxWithElevation: payload = Exporters.gpx(context, includeElevation: true)
-        case .gpxWithoutElevation: payload = Exporters.gpx(context, includeElevation: false)
-        case .geoJSON: payload = Exporters.geoJSON(context)
-        case .jsonLines: payload = Exporters.jsonLines(context)
-        }
+        isExporting = true
+        ioQueue.async { [weak self] in
+            let payload: String
+            switch kind {
+            case .csv: payload = Exporters.csv(context)
+            case .gpxWithElevation: payload = Exporters.gpx(context, includeElevation: true)
+            case .gpxWithoutElevation: payload = Exporters.gpx(context, includeElevation: false)
+            case .geoJSON: payload = Exporters.geoJSON(context)
+            case .jsonLines: payload = Exporters.jsonLines(context)
+            }
 
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let folder = documents.appendingPathComponent("exports", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        } catch {
-            alertMessage = "Gagal menyiapkan folder ekspor: \(error.localizedDescription)"
-            return
-        }
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let folder = documents.appendingPathComponent("exports", isDirectory: true)
+            var written: URL?
+            var failure: String?
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let stamp = Exporters.isoNow()
+                    .replacingOccurrences(of: ":", with: "-")
+                    .replacingOccurrences(of: ".", with: "-")
+                let slug = AppModel.slug(context.project)
+                let url = folder.appendingPathComponent(
+                    "lereng-\(slug)-\(stamp).\(kind.fileExtension)")
+                try payload.write(to: url, atomically: true, encoding: .utf8)
+                written = url
+            } catch {
+                failure = "Gagal menulis berkas: \(error.localizedDescription)"
+            }
 
-        let stamp = Exporters.isoNow()
-            .replacingOccurrences(of: ":", with: "-")
-            .replacingOccurrences(of: ".", with: "-")
-        let slug = Self.slug(survey.name)
-        let url = folder.appendingPathComponent("lereng-\(slug)-\(stamp).\(kind.fileExtension)")
-
-        do {
-            try payload.write(to: url, atomically: true, encoding: .utf8)
-            exportItem = ExportItem(url: url, title: kind.title)
-        } catch {
-            alertMessage = "Gagal menulis berkas: \(error.localizedDescription)"
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isExporting = false
+                if let written {
+                    self.exportItem = ExportItem(url: written, title: kind.title)
+                } else {
+                    self.alertMessage = failure ?? "Ekspor gagal."
+                }
+            }
         }
     }
 

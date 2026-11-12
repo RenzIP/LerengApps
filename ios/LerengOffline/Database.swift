@@ -13,6 +13,11 @@ enum SQLValue {
 /// SQLite lokal. Skema dan nama kolom sama dengan aplikasi Android supaya ekspor konsisten.
 final class Database {
     private var handle: OpaquePointer?
+    /// Satu koneksi SQLite dipakai dari beberapa thread: layar, pembacaan
+    /// snapshot di latar, ekspor, impor, dan sinkron otomatis. Semua metode
+    /// publik dikunci supaya pernyataan tidak saling menimpa. Kuncinya
+    /// rekursif karena beberapa metode memanggil metode publik lain.
+    private let lock = NSRecursiveLock()
 
     init(path: String) {
         var connection: OpaquePointer?
@@ -22,6 +27,9 @@ final class Database {
             fatalError("Tidak dapat membuka database: \(message)")
         }
         handle = connection
+        // WAL membuat penulisan titik tidak menahan pembacaan snapshot dan
+        // sebaliknya. Berkas -wal/-shm berada di folder yang sama.
+        _ = execute("PRAGMA journal_mode = WAL")
         sqlite3_busy_timeout(handle, 3_000)
         _ = execute("PRAGMA foreign_keys = ON")
         migrate()
@@ -137,12 +145,14 @@ final class Database {
     // MARK: - Proyek
 
     func ensureDefaultSurvey() -> Int64 {
+        lock.lock(); defer { lock.unlock() }
         if let first = surveys().first { return first.id }
         return insertSurvey(name: "Pendakian saya", groupCode: "", participantId: "", alias: "")
     }
 
     @discardableResult
     func insertSurvey(name: String, groupCode: String, participantId: String, alias: String) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("""
         INSERT INTO surveys (name, created_at, group_code, participant_id, participant_alias)
         VALUES (?, ?, ?, ?, ?)
@@ -154,6 +164,7 @@ final class Database {
     }
 
     func surveys() -> [Survey] {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("SELECT _id, name, created_at, group_code, participant_id, participant_alias FROM surveys ORDER BY _id")
         defer { sqlite3_finalize(statement) }
         var result: [Survey] = []
@@ -169,6 +180,7 @@ final class Database {
     }
 
     func survey(_ id: Int64) -> Survey? {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("SELECT _id, name, created_at, group_code, participant_id, participant_alias FROM surveys WHERE _id = ?", [.int(id)])
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
@@ -181,12 +193,14 @@ final class Database {
     }
 
     func renameSurvey(_ id: Int64, name: String) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("UPDATE surveys SET name = ? WHERE _id = ?", [.text(name), .int(id)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
     }
 
     func updateIdentity(_ id: Int64, groupCode: String, participantId: String, alias: String) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("""
         UPDATE surveys SET group_code = ?, participant_id = ?, participant_alias = ? WHERE _id = ?
         """, [.text(groupCode), .text(participantId), .text(alias), .int(id)])
@@ -195,6 +209,7 @@ final class Database {
     }
 
     func deleteSurvey(_ id: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("DELETE FROM surveys WHERE _id = ?", [.int(id)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
@@ -204,6 +219,30 @@ final class Database {
 
     @discardableResult
     func insertPoint(_ point: NewPoint) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
+        return insertPointLocked(point)
+    }
+
+    /// Menyisipkan titik hanya bila belum ada baris dengan waktu, peserta,
+    /// koordinat, dan jenis yang sama. Dipakai impor agar berkas yang sama
+    /// tidak menambah data ganda.
+    @discardableResult
+    func insertPointUnique(_ point: NewPoint) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let check = prepare("""
+        SELECT 1 FROM points
+        WHERE survey_id = ? AND participant_id = ? AND time_ms = ? AND lat = ? AND lon = ?
+          AND is_waypoint = ?
+        LIMIT 1
+        """, [.int(point.surveyId), .text(point.participantId), .int(point.time),
+              .double(point.lat), .double(point.lon), .int(point.isWaypoint ? 1 : 0)])
+        defer { sqlite3_finalize(check) }
+        if sqlite3_step(check) == SQLITE_ROW { return false }
+        return insertPointLocked(point) >= 0
+    }
+
+    @discardableResult
+    private func insertPointLocked(_ point: NewPoint) -> Int64 {
         let statement = prepare("""
         INSERT INTO points (survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa,
                             baro_rel_alt, source, label, participant_id, participant_alias,
@@ -225,6 +264,7 @@ final class Database {
     }
 
     func points(surveyId: Int64) -> [TrackPoint] {
+        lock.lock(); defer { lock.unlock() }
         loadPoints(sql: """
         SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
                source, label, participant_id, participant_alias, group_code, is_waypoint
@@ -234,6 +274,7 @@ final class Database {
 
     /// Titik dengan `_id` di atas tanda air; dipakai sinkron otomatis.
     func points(surveyId: Int64, after id: Int64) -> [TrackPoint] {
+        lock.lock(); defer { lock.unlock() }
         loadPoints(sql: """
         SELECT _id, survey_id, time_ms, lat, lon, gps_alt, h_acc, v_acc, pressure_hpa, baro_rel_alt,
                source, label, participant_id, participant_alias, group_code, is_waypoint
@@ -242,6 +283,7 @@ final class Database {
     }
 
     func maxPointId(surveyId: Int64) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
         maxId(table: "points", surveyId: surveyId)
     }
 
@@ -272,12 +314,14 @@ final class Database {
     }
 
     func deletePoint(_ id: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("DELETE FROM points WHERE _id = ?", [.int(id)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
     }
 
     func deletePoints(surveyId: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("DELETE FROM points WHERE survey_id = ?", [.int(surveyId)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
@@ -287,6 +331,7 @@ final class Database {
 
     func insertPresence(surveyId: Int64, time: Int64, observer: String,
                         seen: String, groupCode: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("""
         INSERT OR IGNORE INTO presence
             (survey_id, time_ms, observer_participant_id, seen_participant_id, group_code, bucket_30s)
@@ -300,6 +345,7 @@ final class Database {
     }
 
     func presence(surveyId: Int64) -> [Presence] {
+        lock.lock(); defer { lock.unlock() }
         loadPresence(sql: """
         SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
         FROM presence WHERE survey_id = ? ORDER BY time_ms
@@ -308,6 +354,7 @@ final class Database {
 
     /// Event presence dengan `_id` di atas tanda air; dipakai sinkron otomatis.
     func presence(surveyId: Int64, after id: Int64) -> [Presence] {
+        lock.lock(); defer { lock.unlock() }
         loadPresence(sql: """
         SELECT _id, survey_id, time_ms, observer_participant_id, seen_participant_id, group_code
         FROM presence WHERE survey_id = ? AND _id > ? ORDER BY _id
@@ -315,6 +362,7 @@ final class Database {
     }
 
     func maxPresenceId(surveyId: Int64) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
         maxId(table: "presence", surveyId: surveyId)
     }
 
@@ -342,6 +390,7 @@ final class Database {
     }
 
     func deletePresence(surveyId: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("DELETE FROM presence WHERE survey_id = ?", [.int(surveyId)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)
@@ -354,6 +403,7 @@ final class Database {
     @discardableResult
     func replaceReferenceTrack(surveyId: Int64, name: String, source: String,
                                points: [ReferencePoint]) -> Int64 {
+        lock.lock(); defer { lock.unlock() }
         let usable = points.filter { $0.hasValidCoordinate }
         guard !usable.isEmpty else { return -1 }
         guard execute("BEGIN IMMEDIATE") else { return -1 }
@@ -410,6 +460,7 @@ final class Database {
     }
 
     func referenceTrack(surveyId: Int64) -> ReferenceTrack? {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("""
         SELECT _id, survey_id, name, source, imported_at, point_count
         FROM reference_tracks WHERE survey_id = ? ORDER BY _id DESC LIMIT 1
@@ -426,6 +477,7 @@ final class Database {
 
     /// Koordinat dalam urutan file. Hanya lat/lon karena peta menggambar geometri.
     func referencePoints(surveyId: Int64) -> [ReferencePoint] {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("""
         SELECT p.lat, p.lon, p.ele, p.time_ms
         FROM reference_points p JOIN reference_tracks t ON t._id = p.track_id
@@ -445,6 +497,7 @@ final class Database {
     }
 
     func deleteReferenceTrack(surveyId: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let statement = prepare("DELETE FROM reference_tracks WHERE survey_id = ?", [.int(surveyId)])
         defer { sqlite3_finalize(statement) }
         _ = sqlite3_step(statement)

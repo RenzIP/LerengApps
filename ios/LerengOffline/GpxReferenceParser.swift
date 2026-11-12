@@ -2,9 +2,11 @@ import Foundation
 
 /// Pembaca GPX minimal untuk jalur pembanding.
 ///
-/// Hanya `<trkpt>` yang dipakai sebagai geometri. `<wpt>` dihitung lalu dilewati karena
-/// pembanding tidak menambahkan waypoint ke proyek. Tidak ada unggahan dan tidak ada konversi
-/// datum: elevasi file dibaca apa adanya, lalu diabaikan oleh peta.
+/// `<trkpt>` dan `<rtept>` dipakai sebagai geometri; sebagian aplikasi
+/// mengekspor jalur sebagai rute, bukan track. `<wpt>` dihitung lalu dilewati
+/// karena pembanding tidak menambahkan waypoint ke proyek. Tidak ada unggahan
+/// dan tidak ada konversi datum: elevasi file dibaca apa adanya, lalu diabaikan
+/// oleh peta.
 enum GpxReferenceParser {
     static let maxBytes = 16 * 1024 * 1024
 
@@ -106,7 +108,7 @@ enum GpxReferenceParser {
             guard foundRoot else { return }
 
             switch name.lowercased() {
-            case "trkpt", "wpt":
+            case "trkpt", "rtept", "wpt":
                 builder = Builder(lat: Double(attributes["lat"]?.trimmingCharacters(in: .whitespaces) ?? ""),
                                   lon: Double(attributes["lon"]?.trimmingCharacters(in: .whitespaces) ?? ""),
                                   elevation: nil,
@@ -141,7 +143,8 @@ enum GpxReferenceParser {
                 return
             }
 
-            guard name == "trkpt" || name == "wpt", let completed = builder else { return }
+            guard name == "trkpt" || name == "rtept" || name == "wpt",
+                  let completed = builder else { return }
             builder = nil
             field = ""
             buffer = ""

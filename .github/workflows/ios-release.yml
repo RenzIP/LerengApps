@@ -93,7 +93,8 @@ jobs:
 
           Aplikasi tetap dapat merekam offline: rekaman disimpan di SQLite perangkat, ekspor lewat
           lembar berbagi iOS. Permintaan jaringan hanya manifes pembaruan JSON dan sinkron
-          otomatis ke endpoint HTTPS milikmu bila endpoint serta token sudah diisi.
+          otomatis ke endpoint HTTPS milikmu; endpoint serta kunci aplikasi sudah tertanam di
+          build ini sehingga tidak ada yang perlu diisi.
 
           SHA-256: \`${SHA}\`
           EOF

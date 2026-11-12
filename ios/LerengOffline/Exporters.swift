@@ -19,13 +19,19 @@ enum Exporters {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return formatter
     }()
+    /// Ekspor dan sinkron dapat berjalan bersamaan di antrean berbeda.
+    private static let isoLock = NSLock()
 
     static func iso(_ milliseconds: Int64) -> String {
-        isoFormatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+        isoLock.lock()
+        defer { isoLock.unlock() }
+        return isoFormatter.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
     }
 
     static func isoNow() -> String {
-        isoFormatter.string(from: Date())
+        isoLock.lock()
+        defer { isoLock.unlock() }
+        return isoFormatter.string(from: Date())
     }
 
     private static func number(_ value: Double) -> String {

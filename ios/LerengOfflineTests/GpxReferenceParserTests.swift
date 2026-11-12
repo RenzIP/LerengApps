@@ -60,6 +60,19 @@ final class GpxReferenceParserTests: XCTestCase {
         XCTAssertEqual(result.waypointCount, 1)
     }
 
+    func testAcceptsRoutePoints() throws {
+        let xml = """
+        <gpx version="1.1" creator="Rute"><rte>
+          <rtept lat="-7.5" lon="110.4"><ele>1500</ele></rtept>
+          <rtept lat="-7.501" lon="110.401"/>
+        </rte></gpx>
+        """
+        let result = try parse(xml)
+        XCTAssertEqual(result.points.count, 2)
+        XCTAssertEqual(result.skipped, 0)
+        XCTAssertEqual(result.points[1].lat, -7.501, accuracy: 1e-9)
+    }
+
     func testRejectsNonGpxRoot() {
         XCTAssertThrowsError(try parse("<kml><Placemark/></kml>"))
     }

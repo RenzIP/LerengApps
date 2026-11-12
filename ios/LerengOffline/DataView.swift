@@ -1,8 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DataView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showDeleteAll = false
+    @State private var showCsvImporter = false
+    @State private var showGpxImporter = false
 
     var body: some View {
         NavigationStack {
@@ -10,6 +13,7 @@ struct DataView: View {
                 projectSection
                 pointsSection
                 exportSection
+                importSection
                 syncSection
                 resetSection
             }
@@ -18,6 +22,36 @@ struct DataView: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(item: $model.exportItem) { item in
                 ExportSheet(item: item)
+            }
+            .fileImporter(isPresented: $showCsvImporter,
+                          allowedContentTypes: csvTypes,
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { model.importCSV(from: url) }
+                case .failure(let error):
+                    model.alertMessage = "Tidak dapat membuka file: \(error.localizedDescription)"
+                }
+            }
+            .fileImporter(isPresented: $showGpxImporter,
+                          allowedContentTypes: gpxTypes,
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { model.importTrackGPX(from: url) }
+                case .failure(let error):
+                    model.alertMessage = "Tidak dapat membuka file: \(error.localizedDescription)"
+                }
+            }
+            .confirmationDialog("Referensi elevasi GPX",
+                                isPresented: pendingTrackImportBinding,
+                                titleVisibility: .visible) {
+                ForEach(ImportDatum.options) { option in
+                    Button(option.label) { model.confirmTrackImport(datum: option.value) }
+                }
+                Button("Batal", role: .cancel) { model.cancelTrackImport() }
+            } message: {
+                Text(model.pendingTrackImport?.summary ?? "")
             }
             .confirmationDialog("Hapus semua titik rekaman?", isPresented: $showDeleteAll, titleVisibility: .visible) {
                 Button("Hapus semua titik", role: .destructive) {
@@ -30,14 +64,34 @@ struct DataView: View {
         }
     }
 
+    private var pendingTrackImportBinding: Binding<Bool> {
+        Binding(get: { model.pendingTrackImport != nil },
+                set: { shown in if !shown { model.cancelTrackImport() } })
+    }
+
+    private var csvTypes: [UTType] {
+        var types: [UTType] = [.commaSeparatedText, .plainText]
+        if let csv = UTType(filenameExtension: "csv") { types.insert(csv, at: 0) }
+        return types
+    }
+
+    private var gpxTypes: [UTType] {
+        var types: [UTType] = [.xml]
+        if let gpx = UTType(filenameExtension: "gpx") { types.insert(gpx, at: 0) }
+        return types
+    }
+
     private var projectSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.projectName)
                     .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text("\(model.points.count) titik • \(model.presence.count) catatan kehadiran")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .padding(.vertical, 2)
         } header: {
@@ -72,23 +126,35 @@ struct DataView: View {
 
     private var exportSection: some View {
         Section {
+            if model.isExporting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Menyusun berkas…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Button {
                 model.export(.csv)
             } label: {
                 exportRow(title: "CSV lengkap", subtitle: "Titik + kehadiran BLE, pemisah koma", icon: "tablecells")
             }
+            .disabled(model.isExporting)
 
             Button {
                 model.export(.geoJSON)
             } label: {
                 exportRow(title: "GeoJSON", subtitle: "FeatureCollection untuk peta atau MongoDB", icon: "globe.asia.australia")
             }
+            .disabled(model.isExporting)
 
             Button {
                 model.export(.jsonLines)
             } label: {
                 exportRow(title: "JSON Lines", subtitle: "Satu Fitur per baris, ramah impor MongoDB", icon: "curlybraces")
             }
+            .disabled(model.isExporting)
 
             Menu {
                 Button("Dengan elevasi") { model.export(.gpxWithElevation) }
@@ -96,10 +162,46 @@ struct DataView: View {
             } label: {
                 exportRow(title: "GPX jalur", subtitle: "GPX 1.1 untuk aplikasi peta luar ruang", icon: "map")
             }
+            .disabled(model.isExporting)
         } header: {
             Text("Ekspor lokal")
         } footer: {
-            Text("Ekspor bersifat lokal. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi. Sinkron ke MongoDB berjalan otomatis di bagian bawah.")
+            Text("Ekspor bersifat lokal dan berjalan di latar. Elevasi tidak pernah dikonversi antar datum; GPX hanya menulis <ele> bila semua titik memakai satu referensi. Sinkron ke MongoDB berjalan otomatis di bagian bawah.")
+        }
+    }
+
+    private var importSection: some View {
+        Section {
+            Button {
+                showCsvImporter = true
+            } label: {
+                exportRow(title: "Impor CSV",
+                          subtitle: "Titik, waypoint, dan kehadiran BLE",
+                          icon: "square.and.arrow.down")
+            }
+            .disabled(model.isImporting)
+
+            Button {
+                showGpxImporter = true
+            } label: {
+                exportRow(title: "Impor GPX",
+                          subtitle: "Track, rute, atau waypoint dari aplikasi lain",
+                          icon: "arrow.down.doc")
+            }
+            .disabled(model.isImporting)
+
+            if model.isImporting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Membaca berkas…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Impor ke proyek")
+        } footer: {
+            Text("Impor menambah titik ke proyek aktif, bukan mengganti rekaman. Duplikat dengan waktu dan koordinat sama diabaikan. Referensi elevasi hanya dicatat, tidak dikonversi.")
         }
     }
 

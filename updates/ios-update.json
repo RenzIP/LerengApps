@@ -1,15 +1,16 @@
 {
   "schema": "lereng.ios-update/1",
-  "build": 6,
-  "version": "1.4.1",
+  "build": 7,
+  "version": "1.4.2",
   "minSupportedBuild": 0,
   "mandatory": false,
-  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.1",
+  "downloadUrl": "https://github.com/RenzIP/LerengApps/releases/tag/ios-v1.4.2",
   "notes": [
-    "Sinkron otomatis langsung aktif: endpoint dan kunci aplikasi sudah tertanam, tidak ada isian apa pun",
-    "Bagian sinkron tidak lagi meminta alamat atau kunci; pengaturan lanjutan tetap tersedia bila perlu",
-    "Kunci aplikasi bukan rahasia; server membatasi laju permintaan per IP",
-    "Rekaman offline tetap berjalan dan data dikirim sendiri saat koneksi kembali"
+    "Impor CSV dan GPX dari aplikasi lain langsung ke proyek aktif, lengkap dengan waypoint dan kehadiran BLE",
+    "GPX kini membaca <trkpt>, <rtept>, dan <wpt>; duplikat waktu dan koordinat diabaikan",
+    "Peringatan muncul bila tidak ada titik baru lebih dari 2 menit, jadi GPS yang belum fix terlihat jelas",
+    "Layar tidak lagi tersendat saat merekam: pembacaan data dan ekspor berjalan di latar",
+    "Status jaringan tampil di layar Rekam, dan tombol Mulai menampilkan keadaan Memulai…"
   ],
-  "publishedAt": "2026-11-11T09:20:00Z"
+  "publishedAt": "2026-11-12T04:00:00Z"
 }

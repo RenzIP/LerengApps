@@ -47,7 +47,7 @@ struct RecordView: View {
                         .foregroundStyle(model.isRecording ? Theme.danger : Theme.accent)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.isRecording ? "Sedang merekam" : "Siap merekam")
+                    Text(statusTitle)
                         .font(.headline)
                     Text(model.statusText)
                         .font(.footnote)
@@ -60,6 +60,9 @@ struct RecordView: View {
                         StatusChip(text: model.ble.running ? "BLE aktif" : "BLE mati",
                                    systemImage: "dot.radiowaves.left.and.right",
                                    tint: model.ble.running ? Theme.accent : .secondary)
+                        StatusChip(text: model.networkState.label,
+                                   systemImage: networkIcon,
+                                   tint: networkTint)
                     }
                 }
                 Spacer(minLength: 0)
@@ -98,14 +101,14 @@ struct RecordView: View {
             Button {
                 if model.isRecording { model.stopRecording() } else { model.startRecording() }
             } label: {
-                Label(model.isRecording ? "Hentikan rekaman" : "Mulai merekam",
-                      systemImage: model.isRecording ? "stop.circle.fill" : "play.circle.fill")
+                Label(primaryLabel, systemImage: primaryIcon)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(model.isRecording ? Theme.danger : Theme.accent)
+            .disabled(model.isStarting)
 
             Button {
                 showWaypointDialog = true
@@ -127,6 +130,8 @@ struct RecordView: View {
                     Spacer()
                     Text(survey.groupCode)
                         .font(.body.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
                 HStack {
@@ -134,12 +139,16 @@ struct RecordView: View {
                     Spacer()
                     Text(survey.participantId)
                         .font(.body.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
                 HStack {
                     Text("Nama samaran").foregroundStyle(.secondary)
                     Spacer()
                     Text(survey.participantAlias.isEmpty ? "—" : survey.participantAlias)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 Text(model.ble.status)
                     .font(.caption)
@@ -152,6 +161,38 @@ struct RecordView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.accent)
             }
+        }
+    }
+
+    private var statusTitle: String {
+        if model.isStarting { return "Memulai…" }
+        return model.isRecording ? "Sedang merekam" : "Siap merekam"
+    }
+
+    private var primaryLabel: String {
+        if model.isStarting { return "Memulai…" }
+        return model.isRecording ? "Hentikan rekaman" : "Mulai merekam"
+    }
+
+    private var primaryIcon: String {
+        if model.isStarting { return "hourglass" }
+        return model.isRecording ? "stop.circle.fill" : "play.circle.fill"
+    }
+
+    private var networkIcon: String {
+        switch model.networkState {
+        case .online: return "wifi"
+        case .limited: return "wifi.exclamationmark"
+        case .offline: return "wifi.slash"
+        case .unknown: return "wifi"
+        }
+    }
+
+    private var networkTint: Color {
+        switch model.networkState {
+        case .online: return Theme.accent
+        case .limited: return Theme.warning
+        case .offline, .unknown: return .secondary
         }
     }
 

@@ -136,7 +136,10 @@ struct StatusChip: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: systemImage).font(.caption2.weight(.bold))
-            Text(text).font(.caption.weight(.medium))
+            Text(text)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)

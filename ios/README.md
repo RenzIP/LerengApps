@@ -39,6 +39,10 @@ BLE hanya dapat diuji di perangkat fisik.
 | `BlePresence.swift` | CoreBluetooth: advertise GATT + baca manufacturer data |
 | `BleGroupCodec.swift` | Format kabel BLE identik dengan Android |
 | `Exporters.swift` | CSV, GPX 1.1, GeoJSON, JSON Lines |
+| `CsvCodec.swift` | Pembaca CSV dengan aturan tanda kutip di awal sel |
+| `GpxTrackParser.swift` | GPX untuk impor ke proyek: `<trkpt>`, `<rtept>`, `<wpt>` |
+| `TrackImporter.swift` | `GpxImporter` dan `CsvImporter`, termasuk pembuangan duplikat |
+| `NetworkMonitor.swift` | `NWPathMonitor`: status daring, terbatas, luring |
 | `MongoSync.swift` | Sinkron otomatis inkremental ke endpoint HTTPS; endpoint + kunci bawaan dari Info.plist |
 | `BackgroundSync.swift` | `BGAppRefreshTask` best effort untuk sinkron latar belakang |
 | `UpdateChecker.swift` | Manifes pembaruan `lereng.ios-update/1` |
@@ -113,8 +117,10 @@ hanya memahami bentuk 10 byte, jadi Android→iOS baru terlihat setelah aplikasi
   Karena itu manifes memakai `downloadUrl` yang menunjuk ke halaman GitHub Release; lembar
   pembaruan menampilkan tombol "Buka halaman unduhan".
 - `appStoreUrl`/`testFlightUrl` tetap didukung bila kelak aplikasi terbit di toko Apple.
-- Manifest yang dipublikasikan saat ini memakai `build: 1`, sama dengan build aplikasi, sehingga
-  tidak menampilkan dialog apa pun.
+- Manifest yang dipublikasikan memakai nomor build yang sama dengan build aplikasi yang
+  beredar (saat ini `build: 7` untuk versi 1.4.2), sehingga tidak menampilkan dialog apa pun
+  sampai ada build yang lebih baru. Naikkan nomor build di `project.yml` dan di manifest
+  bersamaan agar pengguna lama melihat tawaran pembaruan.
 
 ## Distribusi
 
@@ -153,8 +159,24 @@ halaman unduhan; pengguna tetap harus memasang ulang dari komputer.
    `CURRENT_PROJECT_VERSION` di `ios/project.yml` agar nomor build cocok.
 
 Kebijakan privasi yang perlu disiapkan untuk App Review: aplikasi mengakses lokasi di latar
-belakang hanya saat merekam, memakai Bluetooth hanya untuk bertukar ID samaran, dan tidak
-mengirim data ke server mana pun selain satu permintaan JSON manifes pembaruan.
+belakang hanya saat merekam, memakai Bluetooth hanya untuk bertukar ID samaran, dan mengirim
+titik, waypoint, kehadiran BLE, serta metadata proyek ke endpoint HTTPS milik pengguna yang
+sudah tertanam di aplikasi. Tidak ada layanan pihak ketiga.
+
+## Impor ke proyek
+
+Tab **Data** → **Impor ke proyek** menambah data ke proyek aktif, tidak menggantinya.
+
+- **CSV** menerima hasil ekspor Lereng Offline atau tabel biasa dengan kolom
+  `latitude, longitude, elevation_m`. Baris kehadiran BLE ikut dibaca.
+- **GPX** menerima `<trkpt>`, `<rtept>`, dan `<wpt>`, termasuk berkas tanpa waktu (urutan file
+  dipakai sebagai waktu relatif).
+- Duplikat dengan waktu dan koordinat sama diabaikan, jadi mengimpor berkas yang sama dua kali
+  tidak menggandakan titik.
+- GPX yang memuat elevasi meminta pilihan referensi lebih dulu (EGM96, WGS84, atau tidak dicatat).
+  Nilai elevasi **tidak** dikonversi; label hanya dicatat agar profil dan terrain tidak
+  mencampur datum.
+- Impor berjalan di antrean latar sehingga layar tidak membeku, lalu menyinkron otomatis.
 
 ## Batasan yang diketahui
 
