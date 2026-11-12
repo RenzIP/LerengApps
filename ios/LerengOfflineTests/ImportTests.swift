@@ -62,6 +62,9 @@ final class ImportTests: XCTestCase {
                                     groupCode: "GUNUNG77", participantId: "1A2B3C4D",
                                     participantAlias: "Renz", appVersion: "1.4.2")
         let csv = Exporters.csv(context)
+        XCTAssertTrue(csv.contains("track,GUNUNG77"), csv)
+        XCTAssertEqual(csv.split(omittingEmptySubsequences: true,
+                                 whereSeparator: { $0.isNewline }).count, 4, csv)
 
         let first = CsvImporter.run(text: csv, fileName: "ekspor.csv",
                                     survey: survey, database: database)

@@ -215,7 +215,11 @@ enum CsvImporter {
         var headerChecked = false
         var columns = Columns()
 
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        // "\r\n" adalah satu Character di Swift, jadi pemisahan harus lewat
+        // `isNewline`; kalau tidak, seluruh CSV hasil ekspor Android terbaca
+        // sebagai satu baris.
+        for rawLine in text.split(omittingEmptySubsequences: false,
+                                   whereSeparator: { $0.isNewline }) {
             rowNumber += 1
             let line = String(rawLine).replacingOccurrences(of: "\r", with: "")
             if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
