@@ -417,7 +417,7 @@ struct ElevationChart: View {
                 guard index % stride == 0 else { continue }
                 let label = Text(String(format: "%.0f", level))
                     .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.secondary)
                 context.draw(label, at: CGPoint(x: rect.minX + 15, y: y - 7), anchor: .center)
             }
 
@@ -432,10 +432,10 @@ struct ElevationChart: View {
                            style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
 
             // Sumbu jarak.
-            context.draw(Text("0").font(.system(size: 9)).foregroundStyle(.secondary),
+            context.draw(Text("0").font(.system(size: 9)).foregroundColor(.secondary),
                          at: CGPoint(x: rect.minX + 4, y: rect.maxY + 10), anchor: .leading)
             context.draw(Text(Format.distance(maxDistance))
-                            .font(.system(size: 9)).foregroundStyle(.secondary),
+                            .font(.system(size: 9)).foregroundColor(.secondary),
                          at: CGPoint(x: rect.maxX, y: rect.maxY + 10), anchor: .trailing)
         }
         .background(Theme.card)
