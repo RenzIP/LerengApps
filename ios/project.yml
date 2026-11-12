@@ -24,8 +24,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: id.bagas.lerengoffline.ios
         PRODUCT_NAME: LerengOffline
-        MARKETING_VERSION: "1.4.2"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "1.4.3"
+        CURRENT_PROJECT_VERSION: "8"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

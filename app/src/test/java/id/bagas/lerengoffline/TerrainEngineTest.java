@@ -2,6 +2,7 @@ package id.bagas.lerengoffline;
 
 import org.junit.Test;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import static org.junit.Assert.*;
 
@@ -45,5 +46,36 @@ public final class TerrainEngineTest {
         TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",5); assertEquals(16,r.distinctSampleCount); assertEquals("WGS84_ELLIPSOID",r.datumGroup); assertTrue(TerrainEngine.compatibleDatum("WGS84","ellipsoid")); assertFalse(TerrainEngine.compatibleDatum("WGS84","EGM2008"));
         assertTrue(TerrainEngine.compatibleDatum("EGM2008", "iOS Core Location approximate orthometric mean sea level"));
         assertFalse(TerrainEngine.compatibleDatum("EGM96", "iOS Core Location approximate orthometric mean sea level"));
+    }
+
+    @Test public void levelsFollowRequestedInterval(){
+        assertEquals(Arrays.asList(105.0,110.0,115.0,120.0),TerrainEngine.levels(5,101,123));
+        assertEquals(Arrays.asList(120.0),TerrainEngine.levels(20,101,123));
+    }
+
+    @Test public void contoursSurviveLevelsThatMatchNodeElevations(){
+        List<TerrainEngine.Sample> s=new ArrayList<>();
+        for(int y=0;y<4;y++)for(int x=0;x<4;x++)
+            s.add(new TerrainEngine.Sample(10+y*.0005,20+x*.0005,100+x*10,"WGS84 ellipsoid"));
+        TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",10);
+        assertFalse(r.cells.isEmpty());
+        for(double level:new double[]{110,120,130}){
+            boolean found=false;
+            for(TerrainEngine.Segment c:r.contours) if(Math.abs(c.elevationMeters-level)<1e-6){found=true;break;}
+            assertTrue("kontur level "+level+" hilang saat level sama dengan elevasi simpul",found);
+        }
+    }
+
+    @Test public void requestedIntervalIsReportedBack(){
+        TerrainEngine.Result r=TerrainEngine.build(regular("WGS84 ellipsoid"),"WGS84 ellipsoid",20);
+        assertEquals(20.0,r.contourIntervalMeters,1e-9);
+    }
+
+    @Test public void requestedIntervalSurvivesEmptyResult(){
+        List<TerrainEngine.Sample> s=new ArrayList<>();
+        for(int i=0;i<3;i++)s.add(new TerrainEngine.Sample(10,20+i*.0002,100+i,"WGS84 ellipsoid"));
+        TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",20);
+        assertFalse(r.hasSurface());
+        assertEquals(20.0,r.contourIntervalMeters,1e-9);
     }
 }

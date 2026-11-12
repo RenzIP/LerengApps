@@ -15,8 +15,11 @@ public final class TerrainEngine {
     public static final double MAX_RADIUS_METERS = 250.0;
     public static final int MAX_NODES = 56;
     public static final int MIN_DISTINCT_SAMPLES = 12;
-    public static final double MIN_RENDER_COVERAGE_PERCENT = 25.0;
-    private static final int MIN_RENDER_CELLS = 8;
+    public static final double MIN_RENDER_COVERAGE_PERCENT = 15.0;
+    /** Interval kontur bawaan saat pengguna memilih "Otomatis" tidak dipakai; ini cadangan aman. */
+    public static final double DEFAULT_INTERVAL_METERS = 10.0;
+    public static final int MAX_CONTOUR_LEVELS = 512;
+    private static final int MIN_RENDER_CELLS = 6;
     private static final double MIN_CONNECTED_FRACTION = 0.60;
     private static final int MAX_NEIGHBORS = 8;
     private static final double MIN_SPAN_METERS = 2.0;
@@ -114,6 +117,7 @@ public final class TerrainEngine {
             this.shouldRenderSurface = canRenderSurface(validCellCount, coverage, largestConnectedCellCount);
         }
         public boolean hasSurface() { return !cells.isEmpty(); }
+        public boolean hasContours() { return !contours.isEmpty(); }
     }
 
     private static final class PointXY {
@@ -153,11 +157,16 @@ public final class TerrainEngine {
 
     public static Result build(List<Sample> input, String requestedDatum, double contourIntervalMeters) {
         String group = datumGroup(requestedDatum);
+        // Interval pilihan pengguna harus tetap terbawa walaupun area belum
+        // terbentuk, supaya profil kontur memakai angka yang sama.
+        double requestedInterval = contourIntervalMeters > 0
+                ? Math.max(1.0, Math.min(200.0, contourIntervalMeters))
+                : DEFAULT_INTERVAL_METERS;
         List<Sample> accepted = new ArrayList<>();
         for (Sample sample : input == null ? Collections.<Sample>emptyList() : input) {
             if (sample != null && valid(sample) && datumGroup(sample.datum).equals(group)) accepted.add(sample);
         }
-        if (accepted.isEmpty()) return empty(accepted, group, 0, "Belum ada sampel elevasi lokal dengan datum terpilih.", 0, 0, 1);
+        if (accepted.isEmpty()) return empty(accepted, group, 0, "Belum ada sampel elevasi dengan referensi yang dipilih.", 0, 0, 1, requestedInterval);
 
         double latitude = 0, longitude = 0;
         for (Sample sample : accepted) { latitude += sample.latitude; longitude += sample.longitude; }
@@ -173,7 +182,7 @@ public final class TerrainEngine {
         }
         int distinctCount = distinctPositions.size();
         if (distinctCount < MIN_DISTINCT_SAMPLES)
-            return empty(accepted, group, distinctCount, "Coverage belum cukup: diperlukan minimal 12 posisi elevasi unik.", latitude, longitude, longitudeScale);
+            return empty(accepted, group, distinctCount, "Baru " + distinctCount + " posisi elevasi unik; kontur area butuh minimal " + MIN_DISTINCT_SAMPLES + ".", latitude, longitude, longitudeScale, requestedInterval);
 
         double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
         double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
@@ -183,7 +192,7 @@ public final class TerrainEngine {
         }
         double spanX = maxX - minX, spanY = maxY - minY;
         if (spanX < MIN_SPAN_METERS || spanY < MIN_SPAN_METERS || Math.max(spanX, spanY) / Math.max(MIN_SPAN_METERS, Math.min(spanX, spanY)) >= 50.0)
-            return empty(accepted, group, distinctCount, "Coverage belum cukup: batas hampir satu dimensi; satu track tidak dibuat menjadi medan area.", latitude, longitude, longitudeScale);
+            return empty(accepted, group, distinctCount, "Titik masih hampir satu garis; kontur area butuh lintasan silang. Profil elevasi sepanjang jalur tetap ditampilkan.", latitude, longitude, longitudeScale, requestedInterval);
 
         double aspect = spanX / spanY;
         double target = Math.max(4.0, distinctCount * 1.4);
@@ -229,18 +238,18 @@ public final class TerrainEngine {
             }
         }
         if (validNodes == 0) { minZ = Double.NaN; maxZ = Double.NaN; }
-        double interval = contourIntervalMeters > 0 ? contourIntervalMeters : chooseInterval(minZ, maxZ);
+        double interval = contourIntervalMeters > 0 ? requestedInterval : chooseInterval(minZ, maxZ);
         List<Segment> contours = extractContours(cells, interval, minZ, maxZ);
         double coverage = 100.0 * cells.size() / Math.max(1, (rows - 1) * (columns - 1));
         int totalCells = Math.max(1, (rows - 1) * (columns - 1));
         int largestComponent = largestConnectedCellCount(cells, rows, columns);
         boolean showSurface = canRenderSurface(cells.size(), coverage, largestComponent);
         String status = cells.isEmpty()
-                ? "Belum ada sel yang didukung di sekeliling sampel; blank = belum ada coverage. Tambahkan lintasan silang/sampel area."
+                ? "Kontur area belum terbentuk: sampel belum mengelilingi satu sel grid. Profil elevasi sepanjang jalur tetap ditampilkan."
                 : showSurface
-                ? "Permukaan ditampilkan hanya pada sel cukup rapat dan terhubung; area kosong tidak diisi."
-                : "Data mendukung " + Math.round(coverage) + "% area (" + cells.size() + "/" + totalCells
-                    + " sel valid), tetapi masih jarang/terpecah. Permukaan disembunyikan; hanya titik ukur asli ditampilkan.";
+                ? "Kontur area hanya dari sel yang terukur dan terhubung; area kosong tidak diisi."
+                : "Kontur area baru terukur di " + Math.round(coverage) + "% area (" + cells.size() + "/" + totalCells
+                    + " sel). Garis kontur parsial tetap ditampilkan; area kosong berarti belum terukur.";
         return new Result(accepted, nodes, cells, contours, rows, columns, distinctCount, validNodes,
                 coverage, interval, minZ, maxZ, latitude, longitude, longitudeScale, group, status);
     }
@@ -265,7 +274,12 @@ public final class TerrainEngine {
         if (neighbors.isEmpty()) return null;
         neighbors.sort(Comparator.comparingDouble(n -> n.distance));
         if (neighbors.get(0).distance <= 0.5) return neighbors.get(0).point.z;
-        if (neighbors.size() < 4 || !(quadrants[0] && quadrants[1] && quadrants[2] && quadrants[3])) return null;
+        int quadrantsCovered = 0;
+        for (boolean quadrant : quadrants) if (quadrant) quadrantsCovered++;
+        // Sebelumnya wajib 4 kuadran penuh, sehingga jalur yang membelok pun
+        // sering menghasilkan 0 sel. Tiga kuadran dengan minimal 4 tetangga
+        // masih merupakan interpolasi lokal yang didukung pengukuran.
+        if (neighbors.size() < 4 || quadrantsCovered < 3) return null;
         int used = Math.min(MAX_NEIGHBORS, neighbors.size());
         double weighted = 0, total = 0;
         for (int i = 0; i < used; i++) {
@@ -277,9 +291,9 @@ public final class TerrainEngine {
     }
 
     private static Result empty(List<Sample> samples, String group, int distinct, String status,
-                                double latitude, double longitude, double longitudeScale) {
+                                double latitude, double longitude, double longitudeScale, double interval) {
         return new Result(samples, Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                0, 0, distinct, 0, 0, 10, Double.NaN, Double.NaN,
+                0, 0, distinct, 0, 0, interval, Double.NaN, Double.NaN,
                 latitude, longitude, longitudeScale, group, status);
     }
 
@@ -317,11 +331,19 @@ public final class TerrainEngine {
         return largest;
     }
 
+    /** Level kontur dipakai bersama oleh peta area dan profil jalur. */
+    public static List<Double> levels(double step, double min, double max) {
+        List<Double> out = new ArrayList<>();
+        if (!Double.isFinite(step) || step <= 0 || !Double.isFinite(min) || !Double.isFinite(max) || max < min) return out;
+        double level = Math.ceil(min / step) * step;
+        for (int i = 0; level <= max + 1e-9 && i < MAX_CONTOUR_LEVELS; i++, level += step) out.add(level);
+        return out;
+    }
+
     private static List<Segment> extractContours(List<Cell> cells, double step, double min, double max) {
         List<Segment> out = new ArrayList<>();
-        if (cells.isEmpty() || !Double.isFinite(step) || step <= 0 || !Double.isFinite(min) || !Double.isFinite(max)) return out;
-        double level = (Math.floor(min / step) + 1) * step;
-        for (; level < max; level += step) {
+        if (cells.isEmpty() || !Double.isFinite(step) || step <= 0) return out;
+        for (double level : levels(step, min, max)) {
             for (Cell cell : cells) {
                 List<double[]> hits = new ArrayList<>(4);
                 edge(cell.nw, cell.ne, level, hits);
@@ -330,7 +352,12 @@ public final class TerrainEngine {
                 edge(cell.sw, cell.nw, level, hits);
                 deduplicate(hits);
                 if (hits.size() == 2) out.add(segment(hits.get(0), hits.get(1), level));
-                else if (hits.size() == 4) {
+                else if (hits.size() == 3) {
+                    // Dulu kasus ini dibuang, sehingga kontur menghilang tepat di
+                    // sudut grid. Hubungkan dua titik terjauh agar garis tetap ada.
+                    double[][] best = longestPair(hits);
+                    out.add(segment(best[0], best[1], level));
+                } else if (hits.size() == 4) {
                     double center = (cell.nw.elevationMeters + cell.ne.elevationMeters + cell.sw.elevationMeters + cell.se.elevationMeters) / 4.0;
                     if (center > level) {
                         out.add(segment(hits.get(0), hits.get(1), level));
@@ -345,8 +372,30 @@ public final class TerrainEngine {
         return out;
     }
 
+    private static double[][] longestPair(List<double[]> points) {
+        double[][] best = {points.get(0), points.get(1)};
+        double bestDistance = -1;
+        for (int i = 0; i < points.size(); i++) {
+            for (int j = i + 1; j < points.size(); j++) {
+                double distance = Math.hypot(points.get(i)[0] - points.get(j)[0], points.get(i)[1] - points.get(j)[1]);
+                if (distance > bestDistance) { bestDistance = distance; best = new double[][]{points.get(i), points.get(j)}; }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Elevasi simpul dengan gangguan deterministik sangat kecil. Tanpa ini,
+     * level kontur yang persis sama dengan elevasi simpul membuat perhitungan
+     * tepi tidak konsisten dan segmen hilang.
+     */
+    private static double contourZ(Node node) {
+        long hash = (node.row * 73856093L) ^ (node.column * 19349663L);
+        return node.elevationMeters + ((hash & 0xffffL) + 1L) * 1.0e-9;
+    }
+
     private static void edge(Node a, Node b, double z, List<double[]> out) {
-        double za = a.elevationMeters, zb = b.elevationMeters;
+        double za = contourZ(a), zb = contourZ(b);
         if (!((za <= z && zb > z) || (zb <= z && za > z))) return;
         double t = (z - za) / (zb - za);
         out.add(new double[]{a.xMeters + (b.xMeters - a.xMeters) * t, a.yMeters + (b.yMeters - a.yMeters) * t});

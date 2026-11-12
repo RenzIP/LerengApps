@@ -47,6 +47,7 @@ import android.text.InputType;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -93,6 +94,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
     /** Mengingat proyek terakhir supaya aplikasi membuka outing yang sedang dipakai. */
     private static final String PREFS_UI = "lereng_ui";
     private static final String KEY_LAST_SURVEY = "last_survey_id";
+    /** Interval kontur dalam meter; 0 berarti otomatis. */
+    private static final String KEY_CONTOUR_INTERVAL = "contour_interval_m";
     private static final long UPDATE_CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L;
     private static final long UPDATE_SNOOZE_MS = 24L * 60L * 60L * 1000L;
 
@@ -153,6 +156,10 @@ public final class MainActivity extends Activity implements LocationListener, Se
     private Button referenceDeleteButton;
     private TextView terrainStatus, terrain2dTab, terrain3dTab;
     private boolean terrain3d;
+    /** 0 = otomatis; nilai lain = interval kontur dalam meter. */
+    private double contourIntervalMeters;
+    private TextView terrainInterval5, terrainInterval10, terrainInterval20;
+    private TextView terrainIntervalAuto, terrainIntervalCustom;
     private LocationManager locationManager;
     private SensorManager sensorManager;
     private Sensor pressureSensor;
@@ -276,6 +283,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
         database = new SurveyDatabase(this);
         exportPrefs = getSharedPreferences(PREFS_EXPORT, MODE_PRIVATE);
         updatePrefs = getSharedPreferences(PREFS_UPDATE, MODE_PRIVATE);
+        contourIntervalMeters = getSharedPreferences(PREFS_UI, MODE_PRIVATE)
+                .getFloat(KEY_CONTOUR_INTERVAL, 10f);
         locationManager = (LocationManager)getSystemService(LOCATION_SERVICE);
         connectivityManager = (ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
         sensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
@@ -735,19 +744,22 @@ public final class MainActivity extends Activity implements LocationListener, Se
         LinearLayout terrainHeader = new LinearLayout(this);
         terrainHeader.setOrientation(LinearLayout.HORIZONTAL);
         terrainHeader.setGravity(Gravity.CENTER_VERTICAL);
-        terrainHeader.addView(UiKit.cardHeader(this, R.drawable.ic_terrain, "Permukaan terrain", null),
+        terrainHeader.addView(UiKit.cardHeader(this, R.drawable.ic_terrain, "Kontur & elevasi", null),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         terrainHeader.addView(buildTerrainSegment());
         terrainCard.addView(terrainHeader);
 
+        terrainCard.addView(buildTerrainIntervalRow(), UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
+
         terrainView = new TerrainView(this);
         terrainCard.addView(terrainView, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(278), 0, 12, 0, 0));
+                dp(278), 0, 10, 0, 0));
 
-        terrainStatus = UiKit.caption(this, "Coverage belum cukup. Blank = belum ada coverage.");
+        terrainStatus = UiKit.caption(this, "Kontur muncul setelah ada titik ber-elevasi.");
         terrainStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         terrainCard.addView(terrainStatus, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 11, 0, 0));
+                LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
         LinearLayout legend = new LinearLayout(this);
         legend.setOrientation(LinearLayout.HORIZONTAL);
@@ -806,6 +818,131 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 is3d ? UiKit.color(this, R.color.surface) : Color.TRANSPARENT, 10, false));
         terrain2dTab.setTextColor(UiKit.color(this, !is3d ? R.color.primary : R.color.text_faint));
         terrain3dTab.setTextColor(UiKit.color(this, is3d ? R.color.primary : R.color.text_faint));
+    }
+
+    /** Baris chip interval kontur; nilainya disimpan lintas proyek dan sesi. */
+    private View buildTerrainIntervalRow() {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout labelRow = new LinearLayout(this);
+        labelRow.setOrientation(LinearLayout.HORIZONTAL);
+        labelRow.setGravity(Gravity.CENTER_VERTICAL);
+        labelRow.addView(UiKit.caption(this, "Interval kontur"),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        labelRow.addView(UiKit.caption(this, "makin kecil, makin rapat"));
+        column.addView(labelRow);
+
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setPadding(0, dp(7), 0, 0);
+
+        terrainInterval5 = intervalChip("5 m", 5);
+        terrainInterval10 = intervalChip("10 m", 10);
+        terrainInterval20 = intervalChip("20 m", 20);
+        terrainIntervalAuto = intervalChip("Otomatis", 0);
+        terrainIntervalCustom = intervalChip("Lain…", -1);
+        chips.addView(terrainInterval5);
+        chips.addView(terrainInterval10);
+        chips.addView(terrainInterval20);
+        chips.addView(terrainIntervalAuto);
+        chips.addView(terrainIntervalCustom);
+        scroll.addView(chips);
+        column.addView(scroll);
+
+        updateIntervalChips();
+        return column;
+    }
+
+    private TextView intervalChip(String label, double value) {
+        TextView chip = UiKit.text(this, label, 12, R.color.text_muted, Typeface.BOLD);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(12), dp(7), dp(12), dp(7));
+        chip.setOnClickListener(v -> selectContourInterval(value));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.rightMargin = dp(6);
+        chip.setLayoutParams(params);
+        return chip;
+    }
+
+    private void selectContourInterval(double value) {
+        if (value < 0) {
+            showCustomIntervalDialog();
+            return;
+        }
+        contourIntervalMeters = value;
+        saveContourInterval();
+        updateIntervalChips();
+        refreshAll();
+    }
+
+    private void updateIntervalChips() {
+        if (terrainInterval5 == null) return;
+        double value = contourIntervalMeters;
+        styleIntervalChip(terrainInterval5, value == 5);
+        styleIntervalChip(terrainInterval10, value == 10);
+        styleIntervalChip(terrainInterval20, value == 20);
+        styleIntervalChip(terrainIntervalAuto, value <= 0);
+        boolean custom = value > 0 && value != 5 && value != 10 && value != 20;
+        terrainIntervalCustom.setText(custom ? formatInterval(value) : "Lain…");
+        styleIntervalChip(terrainIntervalCustom, custom);
+    }
+
+    private void styleIntervalChip(TextView chip, boolean selected) {
+        chip.setBackground(UiKit.rippleFill(this,
+                selected ? UiKit.color(this, R.color.primary_container) : Color.TRANSPARENT, 12, false));
+        chip.setTextColor(UiKit.color(this, selected ? R.color.on_primary_container : R.color.text_muted));
+    }
+
+    private String formatInterval(double value) {
+        return String.format(Locale.getDefault(),
+                value == Math.rint(value) ? "%.0f m" : "%.1f m", value);
+    }
+
+    private void saveContourInterval() {
+        getSharedPreferences(PREFS_UI, MODE_PRIVATE).edit()
+                .putFloat(KEY_CONTOUR_INTERVAL, (float) contourIntervalMeters).apply();
+    }
+
+    private void showCustomIntervalDialog() {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(5)});
+        double current = contourIntervalMeters > 0 ? contourIntervalMeters : TerrainEngine.DEFAULT_INTERVAL_METERS;
+        input.setText(String.format(Locale.getDefault(), "%.1f", current));
+        input.setSelectAllOnFocus(true);
+        FrameLayout wrap = new FrameLayout(this);
+        int pad = dp(16);
+        wrap.setPadding(pad, dp(4), pad, 0);
+        wrap.addView(input);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Interval kontur (meter)")
+                .setMessage("Isi 1–200 m. Garis kontur digambar setiap selisih setinggi ini; "
+                        + "pita warna mengikuti interval yang sama.")
+                .setView(wrap)
+                .setPositiveButton("Simpan", (dialog, which) -> {
+                    double value;
+                    try {
+                        value = Double.parseDouble(input.getText().toString().trim().replace(',', '.'));
+                    } catch (NumberFormatException error) {
+                        Toast.makeText(this, "Angka tidak valid.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (!(value >= 1 && value <= 200)) {
+                        Toast.makeText(this, "Interval harus 1–200 meter.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    contourIntervalMeters = Math.round(value * 10) / 10.0;
+                    saveContourInterval();
+                    updateIntervalChips();
+                    refreshAll();
+                })
+                .setNegativeButton("Batal", null)
+                .show();
     }
 
     // ---------------------------------------------------------------- data tab
@@ -939,7 +1076,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "DATASET LOKAL\n"
                 + "Koreksi hanya diterapkan bila seluruh stasiun rute tercakup. Jika parsial, profil GPS asli dipertahankan; jika GPS juga tidak lengkap, profil tidak ditampilkan. Datum berbeda tidak pernah digabung. Nama datum hanya keterangan—tanpa konversi.\n\n"
                 + "TERRAIN\n"
-                + "Permukaan dan kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Sel di bawah 25% coverage, kurang dari 8 sel valid, atau terpecah tidak digambar. Area kosong berarti belum terukur.\n\n"
+                + "Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Pilih interval 5/10/20 m atau isi sendiri 1–200 m; garis dan pita warna mengikuti interval itu. Bila sampel belum mengelilingi satu sel (mis. satu jalur lurus), aplikasi menampilkan profil kontur sepanjang jalur, bukan mengarang medan area. Area kosong berarti belum terukur.\n\n"
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
@@ -2230,7 +2367,8 @@ public final class MainActivity extends Activity implements LocationListener, Se
                         samples.add(new TerrainEngine.Sample(p.lat,p.lon,p.gpsAltitude,selectedGroup));
                 }
             }
-            final TerrainEngine.Result r = TerrainEngine.build(samples, datum, 0);
+            final double requestedInterval = contourIntervalMeters;
+            final TerrainEngine.Result r = TerrainEngine.build(samples, datum, requestedInterval);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || selectedSurveyId != surveyId) return;
                 if (requestId != terrainRequest.get()) return;
@@ -2243,22 +2381,23 @@ public final class MainActivity extends Activity implements LocationListener, Se
                         mapStatus.setText("Belum ada jalur untuk dipetakan.");
                     } else if (r.shouldRenderSurface) {
                         mapStatus.setText(String.format(Locale.getDefault(),
-                                "%d titik jalur • kontur interpolasi lokal %.1f m • tanpa ubin daring",
-                                track, r.contourIntervalMeters));
+                                "%d titik jalur • kontur area interval %s • tanpa ubin daring",
+                                track, formatInterval(r.contourIntervalMeters)));
                     } else {
-                        mapStatus.setText(track + " titik jalur • kontur belum cukup coverage; jalur & waypoint tetap tampil tanpa ubin daring.");
+                        mapStatus.setText(track + " titik jalur • kontur area belum terbentuk; jalur & waypoint tetap tampil tanpa ubin daring.");
                     }
                 }
                 String visibleDatum = r.datumGroup.startsWith("UNKNOWN:")
-                        ? "datum tidak diketahui • sumber/peserta tidak digabung"
+                        ? "referensi elevasi tidak diketahui • sumber/peserta tidak digabung"
                         : r.datumGroup.replace('_', ' ');
-                String quality = r.shouldRenderSurface
-                        ? String.format(Locale.getDefault(), "interval kontur %.1f m", r.contourIntervalMeters)
-                        : "kontur/permukaan disembunyikan; titik asli saja";
+                String coverage = r.hasSurface()
+                        ? String.format(Locale.getDefault(), "area terukur %d/%d sel (%.0f%%)",
+                                r.validCellCount, r.totalCellCount, r.coveragePercent)
+                        : "kontur area belum terbentuk • profil jalur dipakai";
                 terrainStatus.setText(String.format(Locale.getDefault(),
-                        "%d posisi elevasi unik • area didukung %d/%d sel (%.0f%%) • %s\n%s\n%s",
-                        r.distinctSampleCount, r.validCellCount, r.totalCellCount, r.coveragePercent,
-                        quality, visibleDatum, r.status));
+                        "%d posisi elevasi unik • interval %s\n%s\n%s\n%s",
+                        r.distinctSampleCount, formatInterval(r.contourIntervalMeters),
+                        coverage, visibleDatum, r.status));
             });
         });
     }
@@ -2299,6 +2438,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 if (isFinishing() || isDestroyed() || selectedSurveyId != surveyId) return;
                 if (requestId != profileRequest.get()) return;
                 profileView.setProfile(completedProfile);
+                if (terrainView != null) terrainView.setProfile(completedProfile);
                 boolean hasProfile = completedProfile.stations.size() >= 2;
                 if (statDistance != null) {
                     statDistance.set(hasProfile

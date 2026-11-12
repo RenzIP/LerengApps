@@ -1,12 +1,16 @@
-# Lereng Offline 2.5.5
+# Lereng Offline 2.5.9
 
 Aplikasi Android untuk merekam **satu jalur pendakian bersama rombongan** dan menampilkan profil elevasinya. Track, event BLE, serta dataset elevasi pilihan pengguna tersimpan di SQLite privat pada perangkat. Tidak ada API elevasi pihak ketiga atau unduhan dataset otomatis. Data rekaman dapat dikirim otomatis ke MongoDB milikmu lewat endpoint HTTPS yang kamu siapkan sendiri.
 
-## Permukaan terrain lokal Android
+## Kontur terrain lokal Android
 
-Kartu **Permukaan Terrain Lokal** menyediakan kontur 2D dan permukaan 3D oblique/isometric yang dihitung hanya dari titik elevasi lokal milik pengguna: titik GPS/GNSS ber-elevasi dari proyek/sesi saat ini atau sampel CSV dataset lokal aktif. Tidak ada DEM bawaan, data geografis contoh, internet elevation API, atau sumber pihak ketiga. Perhitungan berjalan asynchronous agar impor besar tidak membekukan UI.
+Kartu **Kontur & elevasi** menyediakan peta kontur 2D, relief 3D oblique, atau profil kontur sepanjang jalur. Semuanya dihitung hanya dari titik elevasi lokal milik pengguna: titik GPS/GNSS ber-elevasi dari proyek/sesi saat ini atau sampel CSV dataset lokal aktif. Tidak ada DEM bawaan, data geografis contoh, internet elevation API, atau sumber pihak ketiga. Perhitungan berjalan asynchronous agar impor besar tidak membekukan UI.
 
-Mesin memproyeksikan WGS84 secara lokal ke meter, membatasi grid pada bounding box sampel, dan tidak melakukan extrapolation di luar dukungan. Grid maksimal 56×56 node; sebuah node hanya sah bila memiliki sedikitnya empat sampel dalam radius 250 m yang tersebar di empat kuadran, lalu memakai paling banyak delapan tetangga terdekat dengan IDW. Cell hanya sah bila keempat sudutnya sah. Selain itu, permukaan/kontur baru dirender bila coverage sekurangnya 25%, terdapat minimal 8 cell valid, dan setidaknya 60% cell valid tersambung; angka ini adalah gate tampilan konservatif, bukan klaim akurasi. Di bawahnya, cell interpolasi yang terpecah disembunyikan dan hanya titik elevasi asli tampil. Sedikitnya 12 lokasi distinct diperlukan; lintasan hampir segaris hanya menampilkan marker. Blank berarti belum ada coverage—tambahkan survei silang atau CSV yang lebih rapat.
+Interval kontur dapat dipilih: **5 m**, **10 m** (bawaan), **20 m**, **Otomatis**, atau angka sendiri **1–200 m**. Garis kontur, garis indeks, pita warna, dan label elevasi mengikuti interval yang sama; pilihan disimpan lintas proyek dan sesi.
+
+Mesin memproyeksikan WGS84 secara lokal ke meter, membatasi grid pada bounding box sampel, dan tidak melakukan extrapolation di luar dukungan. Grid maksimal 56×56 node; sebuah node sah bila memiliki sedikitnya empat sampel dalam radius 250 m yang mencakup sekurangnya tiga kuadran, lalu memakai paling banyak delapan tetangga terdekat dengan IDW. Cell hanya sah bila keempat sudutnya sah. Permukaan area dirender bila coverage sekurangnya 15% dan terdapat minimal 6 cell valid; garis kontur parsial tetap digambar walaupun gate permukaan belum terpenuhi. Sedikitnya 12 lokasi distinct diperlukan.
+
+Bila sampel belum mengelilingi satu sel grid—misalnya satu jalur lurus—aplikasi **tidak mengarang medan area**. Yang tampil adalah profil kontur sepanjang jalur: pita elevasi, garis tiap interval, label elevasi, serta jarak tempuh. Bila elevasi belum ada sama sekali, tampil keadaan kosong yang menjelaskan cara menambah data.
 
 Datum dinormalisasi konservatif: Android `WGS84`/`ellipsoid` berada dalam satu kelompok; `EGM2008`/`mean sea level` hanya cocok dengan label yang jelas sama; datum unknown tetap kelompok terpisah. Kelompok datum berbeda tidak pernah digabung. Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas dan bukan hasil survey-grade.
 
