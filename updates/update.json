@@ -5,8 +5,8 @@
   "mandatory": false,
   "minSupportedVersionCode": 0,
   "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.6.0/LerengOffline-2.6.0.apk",
-  "sizeBytes": 2722965,
-  "sha256": "8a877b8fa19a9682360dabb2944e2bf0e72884155ccbb0e479007163dda4b60c",
+  "sizeBytes": 2722949,
+  "sha256": "76dac00b92563264299fb73844710d8f86c5f0b2d961dadba532a2e3df18966b",
   "notes": [
     "Peta kontur area kini digambar seperti lembar topografi: latar kertas krem, garis kontur cokelat menerus dan halus, garis indeks lebih tebal, label elevasi menempel di sepanjang garis",
     "Potongan kontur disambung menjadi polyline menerus termasuk loop tertutup, lalu dihaluskan dan digambar sebagai kurva",

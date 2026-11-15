@@ -117,6 +117,7 @@ public final class TerrainView extends View {
     // ------------------------------------------------------------ area contours
 
     private void drawArea(Canvas canvas) {
+        if (getWidth() <= 0 || getHeight() <= 0) return;
         if (!computeBounds()) {
             drawEmptyState(canvas);
             return;
