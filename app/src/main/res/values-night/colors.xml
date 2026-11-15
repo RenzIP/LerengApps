@@ -64,4 +64,10 @@
     <color name="terrain_point_ring">#0C1310</color>
     <color name="terrain_badge_bg">#1C2721</color>
     <color name="terrain_badge_text">#CDEDDD</color>
+    <color name="terrain_paper">#151B16</color>
+    <color name="terrain_paper_edge">#2C362E</color>
+    <color name="terrain_contour">#8A7454</color>
+    <color name="terrain_contour_index">#C9A97B</color>
+    <color name="terrain_contour_text">#E8D9BE</color>
+    <color name="terrain_scale">#A99A82</color>
 </resources>

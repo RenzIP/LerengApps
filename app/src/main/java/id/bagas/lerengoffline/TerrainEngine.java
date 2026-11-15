@@ -13,7 +13,7 @@ import java.util.Set;
 /** Bounded, local-only terrain surface. It never extrapolates beyond measured support. */
 public final class TerrainEngine {
     public static final double MAX_RADIUS_METERS = 250.0;
-    public static final int MAX_NODES = 56;
+    public static final int MAX_NODES = 72;
     public static final int MIN_DISTINCT_SAMPLES = 12;
     public static final double MIN_RENDER_COVERAGE_PERCENT = 15.0;
     /** Interval kontur bawaan saat pengguna memilih "Otomatis" tidak dipakai; ini cadangan aman. */
@@ -75,6 +75,19 @@ public final class TerrainEngine {
 
         Segment(double x1, double y1, double x2, double y2, double z) {
             this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2; this.elevationMeters = z;
+        }
+    }
+
+    /** Satu garis kontur menerus; titik-titiknya sudah diurutkan. */
+    public static final class Polyline {
+        public final double elevationMeters;
+        public final List<double[]> points;
+        public final boolean closed;
+
+        Polyline(double elevationMeters, List<double[]> points, boolean closed) {
+            this.elevationMeters = elevationMeters;
+            this.points = points;
+            this.closed = closed;
         }
     }
 
@@ -195,7 +208,10 @@ public final class TerrainEngine {
             return empty(accepted, group, distinctCount, "Titik masih hampir satu garis; kontur area butuh lintasan silang. Profil elevasi sepanjang jalur tetap ditampilkan.", latitude, longitude, longitudeScale, requestedInterval);
 
         double aspect = spanX / spanY;
-        double target = Math.max(4.0, distinctCount * 1.4);
+        // Grid lebih rapat dari jumlah sampel mentah supaya kontur tidak
+        // terlihat seperti balok. Batas atas tetap MAX_NODES agar perangkat
+        // kelas bawah tidak keberatan.
+        double target = Math.max(16.0, distinctCount * 3.5);
         int columns = Math.min(MAX_NODES, Math.max(4, (int)Math.ceil(Math.sqrt(target * aspect))));
         int rows = Math.min(MAX_NODES, Math.max(4, (int)Math.ceil(Math.sqrt(target / aspect))));
         double dx = spanX / (columns - 1), dy = spanY / (rows - 1);
@@ -412,6 +428,87 @@ public final class TerrainEngine {
     }
 
     private static Segment segment(double[] a, double[] b, double level) { return new Segment(a[0], a[1], b[0], b[1], level); }
+
+    /**
+     * Menyambung potongan-potongan marching squares menjadi garis menerus.
+     * Tanpa ini, peta terlihat seperti tumpukan garis pendek yang patah.
+     * Titik disambung pada toleransi 1 cm agar interpolasi dari sel tetangga
+     * tetap dianggap titik yang sama.
+     */
+    public static List<Polyline> trace(List<Segment> segments) {
+        List<Polyline> out = new ArrayList<>();
+        if (segments == null || segments.isEmpty()) return out;
+        Map<Long, List<Segment>> byLevel = new HashMap<>();
+        for (Segment segment : segments) {
+            long levelKey = Math.round(segment.elevationMeters * 1000.0);
+            byLevel.computeIfAbsent(levelKey, ignored -> new ArrayList<>()).add(segment);
+        }
+        for (List<Segment> group : byLevel.values()) out.addAll(traceLevel(group));
+        return out;
+    }
+
+    private static List<Polyline> traceLevel(List<Segment> group) {
+        int count = group.size();
+        long[] firstKeys = new long[count];
+        long[] secondKeys = new long[count];
+        Map<Long, List<Integer>> atPoint = new HashMap<>();
+        for (int i = 0; i < count; i++) {
+            Segment segment = group.get(i);
+            firstKeys[i] = pointKey(segment.x1, segment.y1);
+            secondKeys[i] = pointKey(segment.x2, segment.y2);
+            atPoint.computeIfAbsent(firstKeys[i], ignored -> new ArrayList<>()).add(i);
+            atPoint.computeIfAbsent(secondKeys[i], ignored -> new ArrayList<>()).add(i);
+        }
+
+        boolean[] used = new boolean[count];
+        List<Polyline> out = new ArrayList<>();
+        for (int seed = 0; seed < count; seed++) {
+            if (used[seed]) continue;
+            Segment first = group.get(seed);
+            // Mulai dari ujung bebas bila ada supaya garis terbuka tidak terpotong.
+            boolean startAtFirst = degree(atPoint, firstKeys[seed]) == 1;
+            double startX = startAtFirst ? first.x1 : first.x2;
+            double startY = startAtFirst ? first.y1 : first.y2;
+            long startKey = startAtFirst ? firstKeys[seed] : secondKeys[seed];
+
+            List<double[]> points = new ArrayList<>();
+            points.add(new double[]{startX, startY});
+            int current = seed;
+            long currentKey = startKey;
+            boolean closed = false;
+            while (true) {
+                used[current] = true;
+                Segment segment = group.get(current);
+                boolean enteredAtFirst = currentKey == firstKeys[current];
+                double nextX = enteredAtFirst ? segment.x2 : segment.x1;
+                double nextY = enteredAtFirst ? segment.y2 : segment.y1;
+                long nextKey = enteredAtFirst ? secondKeys[current] : firstKeys[current];
+                points.add(new double[]{nextX, nextY});
+                if (nextKey == startKey) { closed = true; break; }
+                int next = -1;
+                List<Integer> candidates = atPoint.get(nextKey);
+                if (candidates != null) {
+                    for (int candidate : candidates) {
+                        if (!used[candidate]) { next = candidate; break; }
+                    }
+                }
+                if (next < 0) break;
+                current = next;
+                currentKey = nextKey;
+            }
+            if (points.size() >= 2) out.add(new Polyline(first.elevationMeters, points, closed));
+        }
+        return out;
+    }
+
+    private static int degree(Map<Long, List<Integer>> atPoint, long key) {
+        List<Integer> list = atPoint.get(key);
+        return list == null ? 0 : list.size();
+    }
+
+    private static long pointKey(double x, double y) {
+        return key((int) Math.round(x * 100.0), (int) Math.round(y * 100.0));
+    }
 
     private static double chooseInterval(double min, double max) {
         double span = max - min;

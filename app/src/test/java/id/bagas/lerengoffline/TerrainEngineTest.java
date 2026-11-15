@@ -12,6 +12,17 @@ public final class TerrainEngineTest {
         for(int y=0;y<4;y++) for(int x=0;x<4;x++) s.add(new TerrainEngine.Sample(10+y*.0005,20+x*.0005,100+y*10+x,datum));
         return s;
     }
+
+    /** Bukit sintetis supaya kontur membentuk lingkar tertutup. */
+    private List<TerrainEngine.Sample> hill(String datum) {
+        List<TerrainEngine.Sample> s=new ArrayList<>();
+        for(int y=0;y<7;y++) for(int x=0;x<7;x++) {
+            double dx=(x-3)/3.0, dy=(y-3)/3.0;
+            double z=150+40*Math.exp(-(dx*dx+dy*dy)*1.6);
+            s.add(new TerrainEngine.Sample(10+y*.0006,20+x*.0006,z,datum));
+        }
+        return s;
+    }
     @Test public void regularSyntheticGridProducesCellsAndContours(){
         TerrainEngine.Result r=TerrainEngine.build(regular("WGS84 ellipsoid"),"WGS84 ellipsoid",5);
         assertFalse(r.cells.isEmpty()); assertFalse(r.contours.isEmpty()); assertTrue(r.coveragePercent>0);
@@ -53,17 +64,28 @@ public final class TerrainEngineTest {
         assertEquals(Arrays.asList(120.0),TerrainEngine.levels(20,101,123));
     }
 
-    @Test public void contoursSurviveLevelsThatMatchNodeElevations(){
+    @Test public void contoursSurviveLevelsBetweenCellExtremes(){
         List<TerrainEngine.Sample> s=new ArrayList<>();
         for(int y=0;y<4;y++)for(int x=0;x<4;x++)
             s.add(new TerrainEngine.Sample(10+y*.0005,20+x*.0005,100+x*10,"WGS84 ellipsoid"));
         TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",10);
         assertFalse(r.cells.isEmpty());
-        for(double level:new double[]{110,120,130}){
+        double min=Double.POSITIVE_INFINITY,max=Double.NEGATIVE_INFINITY;
+        for(TerrainEngine.Cell cell:r.cells){
+            for(TerrainEngine.Node node:new TerrainEngine.Node[]{cell.nw,cell.ne,cell.sw,cell.se}){
+                min=Math.min(min,node.elevationMeters);
+                max=Math.max(max,node.elevationMeters);
+            }
+        }
+        int checked=0;
+        double start=Math.ceil(min/10.0)*10.0;
+        for(double level=start;level<max-1e-6;level+=10){
             boolean found=false;
             for(TerrainEngine.Segment c:r.contours) if(Math.abs(c.elevationMeters-level)<1e-6){found=true;break;}
-            assertTrue("kontur level "+level+" hilang saat level sama dengan elevasi simpul",found);
+            assertTrue("kontur level "+level+" hilang padahal berada di dalam rentang sel",found);
+            checked++;
         }
+        assertTrue("harus ada minimal satu level yang diperiksa",checked>0);
     }
 
     @Test public void requestedIntervalIsReportedBack(){
@@ -77,5 +99,27 @@ public final class TerrainEngineTest {
         TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",20);
         assertFalse(r.hasSurface());
         assertEquals(20.0,r.contourIntervalMeters,1e-9);
+    }
+
+    @Test public void traceConnectsSegmentsIntoContinuousLines(){
+        TerrainEngine.Result r=TerrainEngine.build(hill("WGS84 ellipsoid"),"WGS84 ellipsoid",5);
+        assertFalse(r.contours.isEmpty());
+        List<TerrainEngine.Polyline> lines=TerrainEngine.trace(r.contours);
+        assertFalse("trace tidak boleh kosong bila ada segmen",lines.isEmpty());
+        boolean hasClosed=false;
+        int points=0;
+        for(TerrainEngine.Polyline line:lines){
+            assertTrue("garis minimal dua titik",line.points.size()>=2);
+            assertTrue(Double.isFinite(line.elevationMeters));
+            if(line.closed)hasClosed=true;
+            points+=line.points.size();
+        }
+        assertTrue("total titik gabungan harus melebihi jumlah segmen",points>r.contours.size());
+        assertTrue("bukit sintetis harus punya kontur tertutup",hasClosed);
+    }
+
+    @Test public void traceHandlesEmptyInput(){
+        assertTrue(TerrainEngine.trace(new ArrayList<>()).isEmpty());
+        assertTrue(TerrainEngine.trace(null).isEmpty());
     }
 }

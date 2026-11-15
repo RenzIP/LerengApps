@@ -761,29 +761,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
         terrainCard.addView(terrainStatus, UiKit.lp(this, LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
-        LinearLayout legend = new LinearLayout(this);
-        legend.setOrientation(LinearLayout.HORIZONTAL);
-        legend.setGravity(Gravity.CENTER_VERTICAL);
-        legend.setPadding(0, dp(9), 0, 0);
-        legend.addView(legendDot(R.color.terrain_low), new LinearLayout.LayoutParams(dp(9), dp(9)));
-        legend.addView(UiKit.caption(this, "rendah"), UiKit.lp(this, LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 5, 0, 12, 0));
-        legend.addView(legendDot(R.color.terrain_peak), new LinearLayout.LayoutParams(dp(9), dp(9)));
-        legend.addView(UiKit.caption(this, "tinggi"), UiKit.lp(this, LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 5, 0, 0, 0));
-        terrainCard.addView(legend);
+        TextView mapLegend = UiKit.caption(this,
+                "Garis tipis tiap interval • garis tebal kontur indeks (5× interval) • label = elevasi (m)");
+        mapLegend.setPadding(0, dp(9), 0, 0);
+        terrainCard.addView(mapLegend);
         UiKit.addCard(page, terrainCard, 12);
 
         return page;
-    }
-
-    private View legendDot(int colorRes) {
-        View dot = new View(this);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(UiKit.color(this, colorRes));
-        dot.setBackground(bg);
-        return dot;
     }
 
     private LinearLayout buildTerrainSegment() {
@@ -1076,7 +1060,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "DATASET LOKAL\n"
                 + "Koreksi hanya diterapkan bila seluruh stasiun rute tercakup. Jika parsial, profil GPS asli dipertahankan; jika GPS juga tidak lengkap, profil tidak ditampilkan. Datum berbeda tidak pernah digabung. Nama datum hanya keterangan—tanpa konversi.\n\n"
                 + "TERRAIN\n"
-                + "Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Pilih interval 5/10/20 m atau isi sendiri 1–200 m; garis dan pita warna mengikuti interval itu. Bila sampel belum mengelilingi satu sel (mis. satu jalur lurus), aplikasi menampilkan profil kontur sepanjang jalur, bukan mengarang medan area. Area kosong berarti belum terukur.\n\n"
+                + "Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Pilih interval 5/10/20 m atau isi sendiri 1–200 m; semua garis, label, dan pita profil mengikuti interval itu. Peta area digambar seperti lembar topografi: kontur menerus yang dihaluskan, garis indeks tiap 5 interval lebih tebal, label elevasi di sepanjang garis, skala jarak, dan keterangan interval. Bila sampel belum mengelilingi satu sel (mis. satu jalur lurus), aplikasi menampilkan profil kontur sepanjang jalur, bukan mengarang medan area. Area kosong berarti belum terukur.\n\n"
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
