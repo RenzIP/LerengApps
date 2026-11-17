@@ -81,17 +81,19 @@ Kalau alamat endpoint berubah, aplikasi menganggapnya target baru dan mengirim
 seluruh riwayat sekali lagi. Dokumen tetap tidak berganda karena `_id` stabil,
 tetapi sebaiknya pakai URL yang tidak berubah.
 
-### Menjaga tetap hidup (Windows)
+### Menyalakan backend saat login (Windows)
 
 Tiga hal harus hidup bersamaan: Docker Desktop, container `lereng-ingest`, dan
-`cloudflared`. Satu skrip idempoten yang dipanggil Windows Task Scheduler tiap
-5 menit cukup untuk ketiganya: skrip menyalakan yang mati dan tidak menyentuh
-yang sudah jalan.
+`cloudflared`. Docker Desktop memakai autostart-nya sendiri saat sign in. Satu
+skrip idempoten dijalankan **sekali saat login** oleh Windows Task Scheduler:
+skrip menunggu mesin Docker siap, menyalakan container bila perlu, lalu
+menyalakan tunnel. Tidak ada jadwal berulang, jadi Docker tidak dibuka paksa
+setiap beberapa menit.
 
 Jalankan lewat pembungkus VBS, **bukan** langsung `powershell.exe`. Windows
 selalu membuat jendela konsol untuk `powershell.exe` sebelum sempat
-menyembunyikannya, sehingga layar berkedip tiap 5 menit. `wscript.exe` adalah
-aplikasi GUI, jadi tidak ada konsol yang dibuat sama sekali.
+menyembunyikannya, sehingga layar berkedip. `wscript.exe` adalah aplikasi GUI,
+jadi tidak ada konsol yang dibuat sama sekali.
 
 `run-hidden.vbs`:
 
@@ -104,16 +106,19 @@ shell.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Fi
 penting: Task Scheduler mematikan proses anak begitu tugas dianggap selesai, dan
 tanpa penantian skrip bisa terhenti saat menunggu mesin Docker siap.
 
-Pasang task-nya sekali:
+Pasang task-nya sekali (dipicu saat logon, delay 1 menit):
 
 ```powershell
-schtasks /Create /TN "Lereng Offline Stack" `
+schtasks /Create /TN "Lereng Offline Backend" `
   /TR 'wscript.exe //B //Nologo "C:\path\run-hidden.vbs"' `
-  /SC MINUTE /MO 5 /RL LIMITED /F
+  /SC ONLOGON /DELAY 0001:00 /RL LIMITED /F
 ```
 
 Aktifkan juga **Start Docker Desktop when you sign in** di pengaturan Docker,
-supaya container ikut hidup setelah reboot.
+supaya container ikut hidup setelah reboot. Skrip sengaja **tidak** membuka
+Docker Desktop sendiri; bila Docker tidak berjalan, skrip hanya menunggu lalu
+mencatat bahwa backend tidak dinyalakan. Kalau Docker ditutup manual saat sesi
+berjalan, backend ikut berhenti sampai Docker dibuka lagi.
 
 ## 2b. Deploy ke Vercel
 
