@@ -1,19 +1,20 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 19,
-  "versionName": "2.6.0",
+  "versionCode": 20,
+  "versionName": "2.6.1",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.6.0/LerengOffline-2.6.0.apk",
-  "sizeBytes": 2722949,
-  "sha256": "76dac00b92563264299fb73844710d8f86c5f0b2d961dadba532a2e3df18966b",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.6.1/LerengOffline-2.6.1.apk",
+  "sizeBytes": 2727577,
+  "sha256": "e6a0a50bd68e658b00caea207fab2cc83c3dd3900a89998deb9c18fd48c90a3f",
   "notes": [
-    "Peta kontur area kini digambar seperti lembar topografi: latar kertas krem, garis kontur cokelat menerus dan halus, garis indeks lebih tebal, label elevasi menempel di sepanjang garis",
-    "Potongan kontur disambung menjadi polyline menerus termasuk loop tertutup, lalu dihaluskan dan digambar sebagai kurva",
-    "Grid terrain dirapatkan hingga 72x72 node mengikuti jumlah sampel unik supaya kontur tidak berbentuk balok",
-    "Skala jarak dan keterangan interval kontur ditambahkan pada peta 2D; legenda garis tipis/tebal ada di bawah peta",
-    "Profil kontur, sebaran titik, dan keadaan kosong memakai palet kertas yang sama",
-    "Interval kontur tetap bisa dipilih 5/10/20 m, Otomatis, atau angka sendiri 1-200 m"
+    "Peta kontur 2D kini mengisi seluruh bingkai: lapisan perkiraan IDW global 42x42 digambar pucat dan putus-putus di luar area terukur",
+    "Kontur terukur tetap digambar lebih tegas di atas lapisan perkiraan; sel yang sudah terukur tidak ditimpa garis perkiraan",
+    "Titik ukur kembali ditampilkan sebagai inti hijau dengan cincin kertas",
+    "Kisi 5x5 tipis dan panah utara ditambahkan seperti lembar topografi",
+    "Bingkai 2D diperlebar dengan ruang tepi dan batas aspek agar jalur survei utara-selatan yang panjang tidak lagi menjadi strip sempit",
+    "Legenda menandai garis putus-putus sebagai perkiraan, bukan kontur terukur",
+    "Interval kontur tetap 5/10/20 m, Otomatis, atau angka sendiri 1-200 m"
   ],
-  "publishedAt": "2026-11-15T00:00:00Z"
+  "publishedAt": "2026-11-19T00:00:00Z"
 }

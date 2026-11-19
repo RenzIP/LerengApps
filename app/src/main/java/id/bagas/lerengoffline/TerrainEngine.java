@@ -25,6 +25,15 @@ public final class TerrainEngine {
     private static final double MIN_SPAN_METERS = 2.0;
     private static final double AGGREGATE_CELL_METERS = 5.0;
 
+    /** Resolusi grid perkiraan; mengikuti grid 42 pada versi awal aplikasi. */
+    public static final int PREVIEW_GRID = 42;
+    private static final double PREVIEW_SOFTENING_M2 = 4.0;
+    private static final int PREVIEW_MAX_POINTS = 2500;
+    private static final int PREVIEW_MAX_DOTS = 1500;
+    private static final int PREVIEW_MAX_LEVELS = 160;
+    private static final double PREVIEW_MIN_ASPECT = 0.42;
+    private static final double PREVIEW_MAX_ASPECT = 2.40;
+
     public static final class Sample {
         public final double latitude;
         public final double longitude;
@@ -131,6 +140,34 @@ public final class TerrainEngine {
         }
         public boolean hasSurface() { return !cells.isEmpty(); }
         public boolean hasContours() { return !contours.isEmpty(); }
+    }
+
+    /**
+     * Lapisan perkiraan yang mengisi seluruh bingkai peta. Nilainya dihitung
+     * dengan IDW global dari semua sampel, bukan hanya sel yang terukur, lalu
+     * digambar pucat sebagai konteks. Sel yang sudah terukur dilewati supaya
+     * kontur asli tidak tertimpa.
+     */
+    public static final class Preview {
+        public final List<Polyline> lines;
+        /** Posisi sampel yang sudah diproyeksikan, untuk titik ukur. */
+        public final List<double[]> points;
+        public final double minX;
+        public final double maxX;
+        public final double minY;
+        public final double maxY;
+        public final double minElevation;
+        public final double maxElevation;
+
+        Preview(List<Polyline> lines, List<double[]> points, double minX, double maxX,
+                double minY, double maxY, double minElevation, double maxElevation) {
+            this.lines = lines;
+            this.points = points;
+            this.minX = minX; this.maxX = maxX; this.minY = minY; this.maxY = maxY;
+            this.minElevation = minElevation; this.maxElevation = maxElevation;
+        }
+
+        public boolean isEmpty() { return lines.isEmpty(); }
     }
 
     private static final class PointXY {
@@ -268,6 +305,128 @@ public final class TerrainEngine {
                     + " sel). Garis kontur parsial tetap ditampilkan; area kosong berarti belum terukur.";
         return new Result(accepted, nodes, cells, contours, rows, columns, distinctCount, validNodes,
                 coverage, interval, minZ, maxZ, latitude, longitude, longitudeScale, group, status);
+    }
+
+    /**
+     * Membuat kontur perkiraan untuk seluruh bingkai peta. Dipakai sebagai
+     * lapisan latar pucat: area yang tidak terukur tetap punya konteks bentuk
+     * lereng, tetapi tidak pernah dianggap setara dengan kontur terukur.
+     *
+     * <p>Metode ini sengaja terpisah dari {@link #build} supaya
+     * {@code shouldRenderSurface} dan status "terukur" tidak berubah.</p>
+     */
+    public static Preview preview(Result result) {
+        if (result == null || result.rows < 2 || result.columns < 2) return null;
+        if (result.samples.size() < MIN_DISTINCT_SAMPLES) return null;
+        double cosLat = result.longitudeScale;
+        if (!Double.isFinite(cosLat) || cosLat <= 0) return null;
+
+        List<PointXY> raw = new ArrayList<>(result.samples.size());
+        double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
+        for (Sample sample : result.samples) {
+            double x = (sample.longitude - result.originLongitude) * 111_320.0 * cosLat;
+            double y = (sample.latitude - result.originLatitude) * 111_320.0;
+            raw.add(new PointXY(x, y, sample.elevationMeters));
+            minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        }
+        if (!Double.isFinite(minX) || !Double.isFinite(minY)) return null;
+
+        // Sedikit ruang tepi seperti versi awal, lalu aspek diringankan agar
+        // jalur utara-selatan yang panjang tidak menjadi garis sempit.
+        double padX = Math.max((maxX - minX) * 0.08, 8.0);
+        double padY = Math.max((maxY - minY) * 0.08, 8.0);
+        minX -= padX; maxX += padX; minY -= padY; maxY += padY;
+        double spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+        double aspect = spanX / spanY;
+        if (aspect < PREVIEW_MIN_ASPECT) {
+            double extra = (spanY * PREVIEW_MIN_ASPECT - spanX) / 2.0;
+            minX -= extra; maxX += extra;
+        } else if (aspect > PREVIEW_MAX_ASPECT) {
+            double extra = (spanX / PREVIEW_MAX_ASPECT - spanY) / 2.0;
+            minY -= extra; maxY += extra;
+        }
+        spanX = maxX - minX; spanY = maxY - minY;
+
+        // Bin 5 m agar IDW global tetap ringan di perangkat kelas bawah.
+        Map<Long, Accumulator> aggregate = new HashMap<>();
+        for (PointXY point : raw) {
+            int bx = (int) Math.floor(point.x / AGGREGATE_CELL_METERS);
+            int by = (int) Math.floor(point.y / AGGREGATE_CELL_METERS);
+            aggregate.computeIfAbsent(key(bx, by), ignored -> new Accumulator()).add(point);
+        }
+        List<PointXY> data = new ArrayList<>(aggregate.size());
+        for (Accumulator accumulator : aggregate.values()) data.add(accumulator.mean());
+        int stride = Math.max(1, (int) Math.ceil(data.size() / (double) PREVIEW_MAX_POINTS));
+        List<PointXY> used = new ArrayList<>();
+        for (int i = 0; i < data.size(); i += stride) used.add(data.get(i));
+        if (used.isEmpty()) return null;
+
+        double dx = spanX / PREVIEW_GRID, dy = spanY / PREVIEW_GRID;
+        Node[][] grid = new Node[PREVIEW_GRID + 1][PREVIEW_GRID + 1];
+        double minZ = Double.POSITIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+        for (int row = 0; row <= PREVIEW_GRID; row++) {
+            double y = minY + row * dy;
+            for (int column = 0; column <= PREVIEW_GRID; column++) {
+                double x = minX + column * dx;
+                double weighted = 0, total = 0;
+                for (PointXY point : used) {
+                    double ddx = x - point.x, ddy = y - point.y;
+                    double d2 = ddx * ddx + ddy * ddy;
+                    if (d2 < 0.0004) { weighted = point.z; total = 1; break; }
+                    double weight = 1.0 / (d2 + PREVIEW_SOFTENING_M2);
+                    weighted += weight * point.z; total += weight;
+                }
+                Double z = total > 0 ? Double.valueOf(weighted / total) : null;
+                grid[row][column] = new Node(row, column, x, y, z);
+                if (z != null && Double.isFinite(z)) {
+                    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+                }
+            }
+        }
+        if (!Double.isFinite(minZ) || maxZ - minZ < 1e-6) return null;
+
+        double interval = result.contourIntervalMeters > 0
+                ? result.contourIntervalMeters : DEFAULT_INTERVAL_METERS;
+        if (levels(interval, minZ, maxZ).size() > PREVIEW_MAX_LEVELS) return null;
+
+        Set<Long> measured = new HashSet<>();
+        double gridMinX = 0, gridMinY = 0, gridDx = 0, gridDy = 0;
+        boolean hasMeasured = !result.cells.isEmpty() && result.nodes.size() >= result.rows * result.columns;
+        if (hasMeasured) {
+            gridMinX = result.nodes.get(0).xMeters;
+            gridMinY = result.nodes.get(0).yMeters;
+            gridDx = (result.nodes.get(result.columns - 1).xMeters - gridMinX) / (result.columns - 1);
+            gridDy = (result.nodes.get((result.rows - 1) * result.columns).yMeters - gridMinY) / (result.rows - 1);
+            for (Cell cell : result.cells) measured.add(key(cell.row, cell.column));
+        }
+
+        List<Cell> cells = new ArrayList<>();
+        for (int row = 0; row < PREVIEW_GRID; row++) {
+            for (int column = 0; column < PREVIEW_GRID; column++) {
+                if (hasMeasured) {
+                    double cx = minX + (column + 0.5) * dx;
+                    double cy = minY + (row + 0.5) * dy;
+                    int cellColumn = (int) Math.floor((cx - gridMinX) / gridDx);
+                    int cellRow = (int) Math.floor((cy - gridMinY) / gridDy);
+                    if (cellColumn >= 0 && cellColumn < result.columns - 1
+                            && cellRow >= 0 && cellRow < result.rows - 1
+                            && measured.contains(key(cellRow, cellColumn))) continue;
+                }
+                cells.add(new Cell(row, column, grid[row][column], grid[row][column + 1],
+                        grid[row + 1][column], grid[row + 1][column + 1]));
+            }
+        }
+        if (cells.isEmpty()) return null;
+        List<Polyline> lines = trace(extractContours(cells, interval, minZ, maxZ));
+        if (lines.isEmpty()) return null;
+
+        List<double[]> dots = new ArrayList<>();
+        int dotStride = Math.max(1, (int) Math.ceil(raw.size() / (double) PREVIEW_MAX_DOTS));
+        for (int i = 0; i < raw.size(); i += dotStride) dots.add(new double[]{raw.get(i).x, raw.get(i).y});
+
+        return new Preview(lines, dots, minX, maxX, minY, maxY, minZ, maxZ);
     }
 
     private static Double estimate(double x, double y, Map<Long, List<PointXY>> spatial) {

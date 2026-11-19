@@ -122,4 +122,37 @@ public final class TerrainEngineTest {
         assertTrue(TerrainEngine.trace(new ArrayList<>()).isEmpty());
         assertTrue(TerrainEngine.trace(null).isEmpty());
     }
+
+    /** Jalur sempit tetap mendapat bingkai perkiraan yang lebih lebar. */
+    @Test public void previewWidensNarrowTrackIntoAFrame(){
+        List<TerrainEngine.Sample> s=new ArrayList<>();
+        for(int y=0;y<40;y++)for(int x=0;x<5;x++)
+            s.add(new TerrainEngine.Sample(10+y*.0002,20+x*.0001,100+y*.4+x,"WGS84 ellipsoid"));
+        TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",5);
+        assertTrue(r.rows>1); assertTrue(r.columns>1);
+        TerrainEngine.Preview p=TerrainEngine.preview(r);
+        assertNotNull("jalur yang punya grid area harus punya lapisan perkiraan",p);
+        assertFalse("lapisan perkiraan tidak boleh kosong",p.lines.isEmpty());
+        double previewWidth=p.maxX-p.minX, previewHeight=p.maxY-p.minY;
+        assertTrue("bingkai perkiraan harus lebih lebar dari jalur sempit",previewWidth>previewHeight*0.40);
+        for(double[] point:p.points){
+            assertTrue(point[0]>=p.minX-1e-6 && point[0]<=p.maxX+1e-6);
+            assertTrue(point[1]>=p.minY-1e-6 && point[1]<=p.maxY+1e-6);
+        }
+        for(TerrainEngine.Polyline line:p.lines)
+            for(double[] point:line.points){
+                assertTrue(point[0]>=p.minX-1e-6 && point[0]<=p.maxX+1e-6);
+                assertTrue(point[1]>=p.minY-1e-6 && point[1]<=p.maxY+1e-6);
+                assertEquals("perkiraan memakai interval yang sama",0,
+                        Math.abs(line.elevationMeters/5.0-Math.rint(line.elevationMeters/5.0)),1e-6);
+            }
+    }
+
+    @Test public void previewIsUnavailableForCollinearTrack(){
+        List<TerrainEngine.Sample> s=new ArrayList<>();
+        for(int i=0;i<20;i++)s.add(new TerrainEngine.Sample(10+i*.0002,20,100+i,"WGS84 ellipsoid"));
+        TerrainEngine.Result r=TerrainEngine.build(s,"WGS84 ellipsoid",5);
+        assertNull(TerrainEngine.preview(r));
+        assertNull(TerrainEngine.preview(null));
+    }
 }

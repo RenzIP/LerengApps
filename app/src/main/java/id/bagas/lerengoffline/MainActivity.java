@@ -762,7 +762,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
         TextView mapLegend = UiKit.caption(this,
-                "Garis tipis tiap interval • garis tebal kontur indeks (5× interval) • label = elevasi (m)");
+                "Garis tipis = kontur terukur • garis putus-putus = perkiraan di luar area terukur • garis tebal = indeks (5× interval) • label = elevasi (m)");
         mapLegend.setPadding(0, dp(9), 0, 0);
         terrainCard.addView(mapLegend);
         UiKit.addCard(page, terrainCard, 12);
@@ -2353,10 +2353,11 @@ public final class MainActivity extends Activity implements LocationListener, Se
             }
             final double requestedInterval = contourIntervalMeters;
             final TerrainEngine.Result r = TerrainEngine.build(samples, datum, requestedInterval);
+            final TerrainEngine.Preview pv = TerrainEngine.preview(r);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || selectedSurveyId != surveyId) return;
                 if (requestId != terrainRequest.get()) return;
-                terrainView.setResult(r);
+                terrainView.setResult(r, pv);
                 if (mapView != null) mapView.setTerrain(r);
                 if (mapStatus != null) {
                     int track = 0;

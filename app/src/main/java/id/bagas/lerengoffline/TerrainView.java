@@ -28,6 +28,7 @@ import java.util.TreeMap;
  */
 public final class TerrainView extends View {
     private TerrainEngine.Result result;
+    private TerrainEngine.Preview preview;
     private RouteProfileEngine.Profile profile;
     private boolean surface3d;
 
@@ -35,9 +36,11 @@ public final class TerrainView extends View {
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint halo = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final Path clip = new Path();
     private final Path paperPath = new Path();
+    private final Path arrowPath = new Path();
     private final RectF plot = new RectF();
     private final RectF paperRect = new RectF();
     private final float[] p1 = new float[2], p2 = new float[2], p3 = new float[2], p4 = new float[2];
@@ -48,6 +51,8 @@ public final class TerrainView extends View {
 
     private TerrainEngine.Result tracedResult;
     private List<TerrainEngine.Polyline> tracedLines = Collections.emptyList();
+    private TerrainEngine.Preview previewScreenSource;
+    private List<ScreenLine> previewScreenLines = Collections.emptyList();
 
     private final DashPathEffect emptyDash =
             new DashPathEffect(new float[]{dp(5), dp(6)}, 0);
@@ -80,12 +85,21 @@ public final class TerrainView extends View {
         halo.setStrokeJoin(Paint.Join.ROUND);
         halo.setStrokeCap(Paint.Cap.ROUND);
         halo.setTextAlign(Paint.Align.CENTER);
+        gridPaint.setStyle(Paint.Style.STROKE);
+        gridPaint.setStrokeWidth(dp(0.8f));
     }
 
     public void setResult(TerrainEngine.Result value) {
+        setResult(value, null);
+    }
+
+    public void setResult(TerrainEngine.Result value, TerrainEngine.Preview previewValue) {
         result = value;
+        preview = value != null ? previewValue : null;
         tracedResult = null;
         tracedLines = Collections.emptyList();
+        previewScreenSource = null;
+        previewScreenLines = Collections.emptyList();
         invalidate();
     }
 
@@ -102,7 +116,8 @@ public final class TerrainView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        boolean hasArea = result != null && result.hasSurface();
+        boolean hasArea = result != null
+                && (result.hasSurface() || (preview != null && !preview.isEmpty()));
         if (hasArea) {
             drawArea(canvas);
         } else if (hasProfile()) {
@@ -150,13 +165,105 @@ public final class TerrainView extends View {
             mapBottom = (height + (float) (spanY * chartScale)) / 2f;
         }
 
+        if (!surface3d) {
+            drawGrid(canvas);
+            drawPreview(canvas);
+            drawSamplePoints(canvas);
+        }
+
         List<ScreenLine> lines = buildScreenLines(surface3d);
         drawContourLines(canvas, lines);
         if (!lines.isEmpty()) drawAreaLabels(canvas, lines);
-        if (!surface3d) drawScaleBar(canvas);
+        if (!surface3d) {
+            drawScaleBar(canvas);
+            drawNorthArrow(canvas);
+        }
         drawLegend(canvas, lines);
         canvas.restore();
         drawPaperBorder(canvas);
+    }
+
+    /** Kisi 5×5 tipis seperti peta topografi cetak versi awal. */
+    private void drawGrid(Canvas canvas) {
+        if (getWidth() <= 0 || getHeight() <= 0) return;
+        gridPaint.setPathEffect(null);
+        gridPaint.setColor(color(R.color.terrain_paper_edge));
+        gridPaint.setAlpha(170);
+        float width = getWidth(), height = getHeight();
+        for (int i = 1; i < 5; i++) {
+            float x = width * i / 5f, y = height * i / 5f;
+            canvas.drawLine(x, 0, x, height, gridPaint);
+            canvas.drawLine(0, y, width, y, gridPaint);
+        }
+    }
+
+    /**
+     * Kontur perkiraan (IDW global) di luar area terukur. Garisnya putus-putus
+     * dan pucat supaya tidak pernah terbaca sebagai kontur asli.
+     */
+    private void drawPreview(Canvas canvas) {
+        if (preview == null || preview.isEmpty() || surface3d) return;
+        List<ScreenLine> lines = previewScreenLines();
+        stroke.setPathEffect(softDash);
+        stroke.setColor(color(R.color.terrain_contour));
+        stroke.setAlpha(96);
+        stroke.setStrokeWidth(dp(1.0f));
+        for (ScreenLine line : lines) {
+            buildSmoothPath(path, line);
+            canvas.drawPath(path, stroke);
+        }
+        stroke.setPathEffect(null);
+        stroke.setAlpha(255);
+    }
+
+    /** Titik ukur: inti hijau dengan cincin kertas, seperti versi awal. */
+    private void drawSamplePoints(Canvas canvas) {
+        if (preview == null || preview.points.isEmpty() || surface3d) return;
+        fillPaint.setStyle(Paint.Style.FILL);
+        for (double[] point : preview.points) {
+            project2d(point[0], point[1], p1);
+            fillPaint.setColor(color(R.color.terrain_paper));
+            fillPaint.setAlpha(210);
+            canvas.drawCircle(p1[0], p1[1], dp(2.8f), fillPaint);
+            fillPaint.setColor(color(R.color.terrain_point));
+            fillPaint.setAlpha(190);
+            canvas.drawCircle(p1[0], p1[1], dp(1.55f), fillPaint);
+        }
+        fillPaint.setAlpha(255);
+    }
+
+    private void drawNorthArrow(Canvas canvas) {
+        float x = getWidth() - dp(23);
+        float top = dp(17), shaftBottom = dp(33);
+        stroke.setPathEffect(null);
+        stroke.setColor(color(R.color.terrain_scale));
+        stroke.setAlpha(220);
+        stroke.setStrokeWidth(dp(1.2f));
+        canvas.drawLine(x, shaftBottom, x, top + dp(9), stroke);
+        arrowPath.reset();
+        arrowPath.moveTo(x, top);
+        arrowPath.lineTo(x - dp(4.6f), top + dp(9.5f));
+        arrowPath.lineTo(x + dp(4.6f), top + dp(9.5f));
+        arrowPath.close();
+        fillPaint.setStyle(Paint.Style.FILL);
+        fillPaint.setColor(color(R.color.terrain_scale));
+        fillPaint.setAlpha(235);
+        canvas.drawPath(arrowPath, fillPaint);
+        fillPaint.setAlpha(255);
+
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setFakeBoldText(true);
+        text.setTextSize(sp(9.5f));
+        text.setColor(color(R.color.terrain_scale));
+        halo.setColor(color(R.color.terrain_paper));
+        halo.setTextSize(sp(9.5f));
+        halo.setFakeBoldText(true);
+        halo.setTextAlign(Paint.Align.CENTER);
+        halo.setStrokeWidth(dp(4));
+        canvas.drawText("N", x, top - dp(3.5f), halo);
+        canvas.drawText("N", x, top - dp(3.5f), text);
+        text.setFakeBoldText(false);
+        text.setTextAlign(Paint.Align.LEFT);
     }
 
     private void drawRelief(Canvas canvas) {
@@ -232,7 +339,10 @@ public final class TerrainView extends View {
     }
 
     private List<ScreenLine> buildScreenLines(boolean is3d) {
-        List<TerrainEngine.Polyline> source = polylines();
+        return buildScreenLines(polylines(), is3d);
+    }
+
+    private List<ScreenLine> buildScreenLines(List<TerrainEngine.Polyline> source, boolean is3d) {
         List<ScreenLine> out = new ArrayList<>(source.size());
         for (TerrainEngine.Polyline polyline : source) {
             ScreenLine line = new ScreenLine(polyline.elevationMeters, polyline.closed);
@@ -304,6 +414,23 @@ public final class TerrainView extends View {
             tracedLines = TerrainEngine.trace(result.contours);
         }
         return tracedLines;
+    }
+
+    private List<ScreenLine> previewScreenLines() {
+        if (preview == null) return Collections.emptyList();
+        if (previewScreenSource != preview) {
+            previewScreenSource = preview;
+            previewScreenLines = buildScreenLines(preview.lines, false);
+        }
+        return previewScreenLines;
+    }
+
+    @Override
+    protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        // Proyeksi garis perkiraan bergantung ukuran kanvas.
+        previewScreenSource = null;
+        previewScreenLines = Collections.emptyList();
     }
 
     /** Label ditempel di sepanjang garis, dengan halo kertas sebagai pemutus garis. */
@@ -413,7 +540,22 @@ public final class TerrainView extends View {
         canvas.drawText(title, x, y, text);
         text.setFakeBoldText(false);
 
-        if (lines.isEmpty()) {
+        boolean hasPreview = preview != null && !preview.isEmpty();
+        if (hasPreview) {
+            String sub = "garis putus-putus = perkiraan di luar area terukur";
+            text.setTextSize(sp(8.5f));
+            text.setColor(color(R.color.terrain_scale));
+            text.setAlpha(215);
+            halo.setTextSize(sp(8.5f));
+            halo.setAlpha(215);
+            halo.setStrokeWidth(dp(3.5f));
+            canvas.drawText(sub, x, y + dp(12), halo);
+            canvas.drawText(sub, x, y + dp(12), text);
+            text.setAlpha(255);
+            halo.setAlpha(255);
+        }
+
+        if (lines.isEmpty() && !hasPreview) {
             text.setTextAlign(Paint.Align.CENTER);
             text.setColor(color(R.color.terrain_contour_text));
             text.setTextSize(sp(13));
@@ -744,6 +886,13 @@ public final class TerrainView extends View {
     // -------------------------------------------------------------------- helpers
 
     private boolean computeBounds() {
+        // Bingkai 2D mengikuti lapisan perkiraan supaya jalur panjang tidak
+        // menjadi strip sempit di tengah kertas.
+        if (!surface3d && preview != null) {
+            minX = preview.minX; maxX = preview.maxX;
+            minY = preview.minY; maxY = preview.maxY;
+            return true;
+        }
         if (result == null || result.nodes.isEmpty()) return false;
         maxX = Double.NEGATIVE_INFINITY;
         maxY = Double.NEGATIVE_INFINITY;
