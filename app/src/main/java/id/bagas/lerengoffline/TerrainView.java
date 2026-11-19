@@ -433,95 +433,92 @@ public final class TerrainView extends View {
         previewScreenLines = Collections.emptyList();
     }
 
-    /** Label ditempel di sepanjang garis, dengan halo kertas sebagai pemutus garis. */
+    /** Label ditempel di sepanjang garis, dengan celah kertas sebagai pemutus garis. */
     private void drawAreaLabels(Canvas canvas, List<ScreenLine> lines) {
-        TreeMap<Long, ScreenLine> longest = new TreeMap<>();
-        ScreenLine highestClosed = null;
+        // Label per garis kontur, bukan hanya garis indeks. Bila satu level
+        // muncul sebagai beberapa garis terpisah, dua yang terpanjang diberi
+        // label supaya cincin lain tidak tertinggal tanpa keterangan.
+        TreeMap<Long, List<ScreenLine>> byLevel = new TreeMap<>();
         for (ScreenLine line : lines) {
             long key = Math.round(line.elevation * 1000.0);
-            ScreenLine existing = longest.get(key);
-            if (existing == null || line.length > existing.length) longest.put(key, line);
-            if (line.closed && (highestClosed == null || line.elevation > highestClosed.elevation)) {
-                highestClosed = line;
-            }
+            byLevel.computeIfAbsent(key, ignored -> new ArrayList<>()).add(line);
         }
-        if (longest.isEmpty()) return;
+        if (byLevel.isEmpty()) return;
 
-        List<ScreenLine> ordered = new ArrayList<>(longest.values());
         List<float[]> placed = new ArrayList<>();
-        final int maxLabels = 5;
-
-        // Seperti peta topografi cetak: label utama pada garis indeks.
-        for (ScreenLine line : ordered) {
-            if (placed.size() >= maxLabels) break;
-            if (isIndexLevel(line.elevation)) placeLabel(canvas, line, placed);
-        }
-        // Bila rentang elevasi sempit sehingga hampir tak ada garis indeks,
-        // sebarkan label pada garis terpanjang supaya peta tidak kosong.
-        if (placed.size() < 2) {
-            int stride = Math.max(1, (int) Math.ceil(ordered.size() / 4.0));
-            for (int i = 0; i < ordered.size() && placed.size() < maxLabels; i += stride) {
-                ScreenLine line = ordered.get(i);
-                if (isIndexLevel(line.elevation)) continue;
-                placeLabel(canvas, line, placed);
+        for (List<ScreenLine> group : byLevel.values()) {
+            group.sort((a, b) -> Float.compare(b.length, a.length));
+            int limit = Math.min(2, group.size());
+            for (int i = 0; i < limit; i++) {
+                placeLabel(canvas, group.get(i), placed);
             }
         }
-        if (highestClosed != null) placeLabel(canvas, highestClosed, placed);
     }
 
     private boolean placeLabel(Canvas canvas, ScreenLine line, List<float[]> placed) {
         int count = line.points.size();
-        if (count < 2 || line.length < dp(56)) return false;
+        if (count < 2 || line.length < dp(36)) return false;
 
-        int index;
-        if (line.closed) {
-            index = 0;
-            for (int i = 1; i < count; i++) {
-                if (line.points.get(i)[1] < line.points.get(index)[1]) index = i;
-            }
-        } else {
-            float target = line.length * 0.5f, walked = 0;
-            index = count / 2;
-            for (int i = 1; i < count; i++) {
-                float[] a = line.points.get(i - 1), b = line.points.get(i);
-                walked += (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
-                if (walked >= target) { index = i; break; }
-            }
-        }
-
-        float[] point = line.points.get(index);
-        float[] before = line.points.get(Math.max(0, index - 2));
-        float[] after = line.points.get(Math.min(count - 1, index + 2));
-        float angle = (float) Math.toDegrees(Math.atan2(after[1] - before[1], after[0] - before[0]));
-        if (angle > 90f) angle -= 180f;
-        else if (angle < -90f) angle += 180f;
-
-        String label = formatLevel(line.elevation);
-        text.setTextSize(sp(10));
+        String label = formatLevel(line.elevation) + " m";
+        text.setTextSize(sp(9.5f));
         text.setFakeBoldText(true);
         float labelWidth = text.measureText(label);
-        float radius = Math.max(labelWidth, sp(10)) * 0.62f;
-        if (point[0] < dp(26) || point[0] > getWidth() - dp(26)
-                || point[1] < dp(30) || point[1] > getHeight() - dp(30)) return false;
-        for (float[] other : placed) {
-            if (Math.hypot(point[0] - other[0], point[1] - other[1]) < radius + other[2]) return false;
-        }
-        placed.add(new float[]{point[0], point[1], radius});
+        float halfWidth = labelWidth / 2f;
+        float radius = Math.max(halfWidth + dp(2), sp(8));
 
-        float baseline = point[1] + sp(3.4f);
-        halo.setColor(color(R.color.terrain_paper));
-        halo.setTextSize(sp(10));
-        halo.setFakeBoldText(true);
-        halo.setTextAlign(Paint.Align.CENTER);
-        halo.setStrokeWidth(dp(5.5f));
-        text.setColor(color(R.color.terrain_contour_text));
-        canvas.save();
-        canvas.rotate(angle, point[0], point[1]);
-        canvas.drawText(label, point[0], baseline, halo);
-        canvas.drawText(label, point[0], baseline, text);
-        canvas.restore();
+        int topIndex = 0;
+        for (int i = 1; i < count; i++) {
+            if (line.points.get(i)[1] < line.points.get(topIndex)[1]) topIndex = i;
+        }
+        // Beberapa kandidat posisi: label pertama di puncak garis tertutup,
+        // lalu digeser mengelilingi garis agar label lain tidak bertumpuk.
+        float[] fractions = line.closed
+                ? new float[]{0f, 0.16f, 0.32f, 0.48f, 0.64f, 0.80f}
+                : new float[]{0.50f, 0.36f, 0.64f, 0.22f, 0.78f, 0.10f, 0.90f};
+
+        for (float fraction : fractions) {
+            int index = line.closed
+                    ? (topIndex + Math.round(fraction * count)) % count
+                    : Math.round(fraction * (count - 1));
+            float[] point = line.points.get(index);
+            float baseline = point[1] + sp(3.3f);
+            if (point[0] - halfWidth < dp(8) || point[0] + halfWidth > getWidth() - dp(8)
+                    || point[1] < dp(42) || point[1] > getHeight() - dp(26)) continue;
+            boolean collision = false;
+            for (float[] other : placed) {
+                if (Math.hypot(point[0] - other[0], point[1] - other[1]) < radius + other[2]) {
+                    collision = true;
+                    break;
+                }
+            }
+            if (collision) continue;
+
+            float[] before = line.points.get(line.closed
+                    ? (index - 2 + count) % count : Math.max(0, index - 2));
+            float[] after = line.points.get(line.closed
+                    ? (index + 2) % count : Math.min(count - 1, index + 2));
+            float angle = (float) Math.toDegrees(Math.atan2(after[1] - before[1], after[0] - before[0]));
+            if (angle > 90f) angle -= 180f;
+            else if (angle < -90f) angle += 180f;
+
+            placed.add(new float[]{point[0], point[1], radius});
+
+            canvas.save();
+            canvas.rotate(angle, point[0], point[1]);
+            Paint.FontMetrics metrics = text.getFontMetrics();
+            fillPaint.setStyle(Paint.Style.FILL);
+            fillPaint.setColor(color(R.color.terrain_paper));
+            fillPaint.setAlpha(255);
+            canvas.drawRect(point[0] - halfWidth - dp(2.2f), baseline + metrics.ascent - dp(1.5f),
+                    point[0] + halfWidth + dp(2.2f), baseline + metrics.descent + dp(1.5f), fillPaint);
+            text.setColor(color(R.color.terrain_contour_text));
+            canvas.drawText(label, point[0], baseline, text);
+            canvas.restore();
+            text.setFakeBoldText(false);
+            return true;
+        }
         text.setFakeBoldText(false);
-        return true;
+        return false;
     }
 
     private void drawLegend(Canvas canvas, List<ScreenLine> lines) {
@@ -542,7 +539,7 @@ public final class TerrainView extends View {
 
         boolean hasPreview = preview != null && !preview.isEmpty();
         if (hasPreview) {
-            String sub = "garis putus-putus = perkiraan di luar area terukur";
+            String sub = "putus-putus = perkiraan • label = elevasi kontur terukur";
             text.setTextSize(sp(8.5f));
             text.setColor(color(R.color.terrain_scale));
             text.setAlpha(215);

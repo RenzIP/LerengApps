@@ -1,20 +1,20 @@
 {
   "schema": "lereng.update/1",
-  "versionCode": 20,
-  "versionName": "2.6.1",
+  "versionCode": 21,
+  "versionName": "2.6.2",
   "mandatory": false,
   "minSupportedVersionCode": 0,
-  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.6.1/LerengOffline-2.6.1.apk",
-  "sizeBytes": 2727577,
-  "sha256": "e6a0a50bd68e658b00caea207fab2cc83c3dd3900a89998deb9c18fd48c90a3f",
+  "apkUrl": "https://github.com/RenzIP/LerengApps/releases/download/v2.6.2/LerengOffline-2.6.2.apk",
+  "sizeBytes": 2728313,
+  "sha256": "c4a6c6ef7c71b1ac355dc8066d18ec731d2b244ae144415373631c387dac2e7f",
   "notes": [
-    "Peta kontur 2D kini mengisi seluruh bingkai: lapisan perkiraan IDW global 42x42 digambar pucat dan putus-putus di luar area terukur",
-    "Kontur terukur tetap digambar lebih tegas di atas lapisan perkiraan; sel yang sudah terukur tidak ditimpa garis perkiraan",
-    "Titik ukur kembali ditampilkan sebagai inti hijau dengan cincin kertas",
-    "Kisi 5x5 tipis dan panah utara ditambahkan seperti lembar topografi",
-    "Bingkai 2D diperlebar dengan ruang tepi dan batas aspek agar jalur survei utara-selatan yang panjang tidak lagi menjadi strip sempit",
-    "Legenda menandai garis putus-putus sebagai perkiraan, bukan kontur terukur",
-    "Interval kontur tetap 5/10/20 m, Otomatis, atau angka sendiri 1-200 m"
+    "Setiap kontur terukur kini diberi label elevasinya sendiri, misalnya 100 m, 110 m, 120 m, mengikuti interval yang dipilih",
+    "Label dipasang dengan celah kertas di belakang angka sehingga garis kontur terputus rapi seperti peta topografi cetak",
+    "Bila satu level muncul sebagai beberapa garis terpisah, dua garis terpanjang ikut diberi label",
+    "Label dicari posisi yang tidak bertumpuk: mulai dari puncak garis tertutup lalu digeser mengelilingi garis",
+    "Label hanya dipasang pada kontur terukur; garis putus-putus perkiraan di luar area terukur tetap tanpa angka",
+    "Legenda, status coverage, dan teks bantuan diperjelas: kontur terukur vs perkiraan pucat",
+    "Lapisan perkiraan, titik ukur, kisi 5x5, panah utara, dan bingkai lebar dari 2.6.1 tetap dipertahankan"
   ],
   "publishedAt": "2026-11-19T00:00:00Z"
 }

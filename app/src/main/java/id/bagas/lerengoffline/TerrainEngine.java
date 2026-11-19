@@ -298,11 +298,11 @@ public final class TerrainEngine {
         int largestComponent = largestConnectedCellCount(cells, rows, columns);
         boolean showSurface = canRenderSurface(cells.size(), coverage, largestComponent);
         String status = cells.isEmpty()
-                ? "Kontur area belum terbentuk: sampel belum mengelilingi satu sel grid. Profil elevasi sepanjang jalur tetap ditampilkan."
+                ? "Kontur terukur belum terbentuk: sampel belum mengelilingi satu sel grid. Perkiraan pucat dan profil jalur tetap membantu membaca bentuk lereng."
                 : showSurface
-                ? "Kontur area hanya dari sel yang terukur dan terhubung; area kosong tidak diisi."
+                ? "Kontur area hanya dari sel yang terukur dan terhubung; area di luarnya hanya perkiraan pucat."
                 : "Kontur area baru terukur di " + Math.round(coverage) + "% area (" + cells.size() + "/" + totalCells
-                    + " sel). Garis kontur parsial tetap ditampilkan; area kosong berarti belum terukur.";
+                    + " sel). Garis kontur parsial tetap ditampilkan; area di luar sel terukur hanya perkiraan.";
         return new Result(accepted, nodes, cells, contours, rows, columns, distinctCount, validNodes,
                 coverage, interval, minZ, maxZ, latitude, longitude, longitudeScale, group, status);
     }

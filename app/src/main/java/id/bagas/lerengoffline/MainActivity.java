@@ -762,7 +762,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 LinearLayout.LayoutParams.WRAP_CONTENT, 0, 10, 0, 0));
 
         TextView mapLegend = UiKit.caption(this,
-                "Garis tipis = kontur terukur • garis putus-putus = perkiraan di luar area terukur • garis tebal = indeks (5× interval) • label = elevasi (m)");
+                "Garis tipis = kontur terukur • garis putus-putus = perkiraan • garis tebal = indeks (5× interval) • label = elevasi tiap kontur terukur (m)");
         mapLegend.setPadding(0, dp(9), 0, 0);
         terrainCard.addView(mapLegend);
         UiKit.addCard(page, terrainCard, 12);
@@ -1060,7 +1060,7 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 + "DATASET LOKAL\n"
                 + "Koreksi hanya diterapkan bila seluruh stasiun rute tercakup. Jika parsial, profil GPS asli dipertahankan; jika GPS juga tidak lengkap, profil tidak ditampilkan. Datum berbeda tidak pernah digabung. Nama datum hanya keterangan—tanpa konversi.\n\n"
                 + "TERRAIN\n"
-                + "Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Pilih interval 5/10/20 m atau isi sendiri 1–200 m; semua garis, label, dan pita profil mengikuti interval itu. Peta area digambar seperti lembar topografi: kontur menerus yang dihaluskan, garis indeks tiap 5 interval lebih tebal, label elevasi di sepanjang garis, skala jarak, dan keterangan interval. Bila sampel belum mengelilingi satu sel (mis. satu jalur lurus), aplikasi menampilkan profil kontur sepanjang jalur, bukan mengarang medan area. Area kosong berarti belum terukur.\n\n"
+                + "Kontur adalah interpolasi lokal di dalam dukungan sampel, bukan DEM area luas. Pilih interval 5/10/20 m atau isi sendiri 1–200 m; semua garis, label, dan pita profil mengikuti interval itu. Peta area digambar seperti lembar topografi: kontur menerus yang dihaluskan, garis indeks tiap 5 interval lebih tebal, setiap kontur terukur diberi label elevasi (m) dengan celah kertas, skala jarak, panah utara, dan keterangan interval. Di luar area terukur, garis putus-putus pucat adalah perkiraan IDW untuk konteks dan tidak diberi label—itu bukan kontur terukur. Bila sampel belum mengelilingi satu sel (mis. satu jalur lurus), aplikasi menampilkan profil kontur sepanjang jalur, bukan mengarang medan area.\n\n"
                 + "BLE\n"
                 + "BLE hanya mencatat ID samaran dan waktu terlihat; tidak menyimpan MAC/RSSI, tidak mengukur jarak, posisi, elevasi, atau triangulasi. iOS dapat membatasi scan/advertising di background. BLE bukan alat keselamatan.\n\n"
                 + "PENYIMPANAN\n"
@@ -2375,9 +2375,13 @@ public final class MainActivity extends Activity implements LocationListener, Se
                 String visibleDatum = r.datumGroup.startsWith("UNKNOWN:")
                         ? "referensi elevasi tidak diketahui • sumber/peserta tidak digabung"
                         : r.datumGroup.replace('_', ' ');
+                boolean hasEstimate = pv != null && !pv.isEmpty();
                 String coverage = r.hasSurface()
                         ? String.format(Locale.getDefault(), "area terukur %d/%d sel (%.0f%%)",
                                 r.validCellCount, r.totalCellCount, r.coveragePercent)
+                            + (hasEstimate ? " • sisanya perkiraan" : "")
+                        : hasEstimate
+                        ? "kontur terukur belum terbentuk • tampilan hanya perkiraan"
                         : "kontur area belum terbentuk • profil jalur dipakai";
                 terrainStatus.setText(String.format(Locale.getDefault(),
                         "%d posisi elevasi unik • interval %s\n%s\n%s\n%s",
